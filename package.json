@@ -1,8 +1,8 @@
 {
   "name": "free-request",
   "displayName": "Free Request",
-  "version": "0.0.2",
-  "publisher": "free-request",
+  "version": "0.0.1",
+  "publisher": "cxwang",
   "engines": {
     "vscode": "^1.80.0"
   },

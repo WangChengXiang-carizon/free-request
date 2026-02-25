@@ -34,7 +34,7 @@ generate:
 	@echo "==== VSCode插件生成完成 ===="
 
 build:
-	cd $(PLUGIN_NAME) && npm install && npm run compile
+	npm install && npm run compile
 
 package:
-	cd $(PLUGIN_NAME) && npm run package
+	npm run package
