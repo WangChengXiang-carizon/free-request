@@ -1,0 +1,271 @@
+{
+  "name": "free-request",
+  "displayName": "Free Request",
+  "version": "0.0.1",
+  "publisher": "free-request",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onView:free-request-collections",
+    "onView:free-request-environments",
+    "onView:free-request-history",
+    "onCommand:free-request.newEnvGroup",
+    "onCommand:free-request.newEnv"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "free-request.sendRequest",
+        "title": "请求",
+        "category": "Free Request"
+      },
+      {
+        "command": "free-request.editRequest",
+        "title": "编辑",
+        "category": "Free Request"
+      },
+      {
+        "command": "free-request.newRequest",
+        "title": "新建请求",
+        "category": "Free Request"
+      },
+      {
+        "command": "free-request.newCollection",
+        "title": "新建集合",
+        "category": "Free Request"
+      },
+      {
+        "command": "free-request.newSubCollection",
+        "title": "新建子集合",
+        "category": "Free Request"
+      },
+      {
+        "command": "free-request.deleteItem",
+        "title": "删除",
+        "category": "Free Request"
+      },
+      {
+        "command": "free-request.renameItem",
+        "title": "重命名",
+        "category": "Free Request"
+      },
+      {
+        "command": "free-request.duplicateRequest",
+        "title": "复制",
+        "category": "Free Request"
+      },
+      {
+        "command": "free-request.duplicateCollection",
+        "title": "复制",
+        "category": "Free Request"
+      },
+      {
+        "command": "free-request.newEnvGroup",
+        "title": "新建环境组",
+        "category": "Free Request"
+      },
+      {
+        "command": "free-request.newSubEnvGroup",
+        "title": "新建子环境组",
+        "category": "Free Request"
+      },
+      {
+        "command": "free-request.newEnv",
+        "title": "新建环境变量",
+        "category": "Free Request"
+      },
+      {
+        "command": "free-request.editEnv",
+        "title": "编辑环境变量",
+        "category": "Free Request"
+      },
+      {
+        "command": "free-request.duplicateEnvGroup",
+        "title": "复制环境组",
+        "category": "Free Request"
+      },
+      {
+        "command": "free-request.duplicateEnv",
+        "title": "复制环境变量",
+        "category": "Free Request"
+      },
+      {
+        "command": "free-request.refreshTree",
+        "title": "刷新",
+        "category": "Free Request",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "free-request.manualSave",
+        "title": "手动保存",
+        "category": "Free Request"
+      },
+      {
+        "command": "free-request.exportData",
+        "title": "导出数据",
+        "category": "Free Request"
+      },
+      {
+        "command": "free-request.importData",
+        "title": "导入数据",
+        "category": "Free Request"
+      }
+    ],
+    "menus": {
+      "view/item/context": [
+        {
+          "command": "free-request.sendRequest",
+          "when": "viewItem == request",
+          "group": "inline"
+        },
+        {
+          "command": "free-request.editRequest",
+          "when": "viewItem == request",
+          "group": "inline"
+        },
+        {
+          "command": "free-request.newRequest",
+          "when": "viewItem == collection",
+          "group": "inline"
+        },
+        {
+          "command": "free-request.newSubCollection",
+          "when": "viewItem == collection",
+          "group": "inline"
+        },
+        {
+          "command": "free-request.renameItem",
+          "when": "viewItem == collection || viewItem == request || viewItem == env_group || viewItem == environment",
+          "group": "inline"
+        },
+        {
+          "command": "free-request.deleteItem",
+          "when": "viewItem == collection || viewItem == request || viewItem == env_group || viewItem == environment",
+          "group": "inline"
+        },
+        {
+          "command": "free-request.duplicateRequest",
+          "when": "viewItem == request",
+          "group": "inline"
+        },
+        {
+          "command": "free-request.duplicateCollection",
+          "when": "viewItem == collection",
+          "group": "inline"
+        },
+        {
+          "command": "free-request.newSubEnvGroup",
+          "when": "viewItem == env_group",
+          "group": "inline"
+        },
+        {
+          "command": "free-request.newEnv",
+          "when": "viewItem == env_group",
+          "group": "inline"
+        },
+        {
+          "command": "free-request.duplicateEnvGroup",
+          "when": "viewItem == env_group",
+          "group": "inline"
+        },
+        {
+          "command": "free-request.editEnv",
+          "when": "viewItem == environment",
+          "group": "inline"
+        },
+        {
+          "command": "free-request.duplicateEnv",
+          "when": "viewItem == environment",
+          "group": "inline"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "free-request.newCollection",
+          "when": "view == free-request-collections",
+          "group": "navigation@3",
+          "icon": "$(folder-add)"
+        },
+        {
+          "command": "free-request.newRequest",
+          "when": "view == free-request-collections",
+          "group": "navigation@4",
+          "icon": "$(add)"
+        },
+        {
+          "command": "free-request.newEnvGroup",
+          "when": "view == free-request-environments",
+          "group": "navigation@1",
+          "icon": "$(folder-library)"
+        },
+        {
+          "command": "free-request.newEnv",
+          "when": "view == free-request-environments",
+          "group": "navigation@2",
+          "icon": "$(settings-gear)"
+        },
+        {
+          "command": "free-request.refreshTree",
+          "when": "view == free-request-collections || view == free-request-environments || view == free-request-history",
+          "group": "navigation@9",
+          "icon": "$(refresh)"
+        },
+        {
+          "command": "free-request.exportData",
+          "when": "view == free-request-collections",
+          "group": "navigation@1",
+          "icon": "$(export)"
+        },
+        {
+          "command": "free-request.importData",
+          "when": "view == free-request-collections",
+          "group": "navigation@2",
+          "icon": "$(import)"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "free-request-container",
+          "title": "Free Request",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "free-request-container": [
+        {
+          "id": "free-request-collections",
+          "name": "Collections"
+        },
+        {
+          "id": "free-request-environments",
+          "name": "Environments"
+        },
+        {
+          "id": "free-request-history",
+          "name": "History"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "test": "npm run compile && node --test out/test/**/*.test.js",
+    "package": "vsce package --allow-missing-repository"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.6.2",
+    "@types/node": "^16.18.126",
+    "@types/vscode": "^1.80.0",
+    "typescript": "^5.4.5"
+  },
+  "dependencies": {
+    "axios": "^1.6.8"
+  }
+}
