@@ -8,6 +8,7 @@ import type {
   RequestModel
 } from './models';
 import {
+  closeRequestEditorsByIds,
   openRequestEditor,
   registerRequestCommands,
   type RequestControllerDeps
@@ -427,8 +428,20 @@ class RequestDragAndDropController implements vscode.TreeDragAndDropController<B
       return;
     }
 
-    if (target && target.type !== 'collection') {
-      vscode.window.showWarningMessage('请求只能拖拽到 Collection 或根目录。');
+    if (target && target.type !== 'collection' && target.type !== 'request') {
+      vscode.window.showWarningMessage('请求只能拖拽到 Collection、Request 或根目录。');
+      return;
+    }
+
+    if (target?.type === 'request') {
+      const moved = this.dataStore.moveRequestsBeforeTarget(requestIds, target.id);
+      if (!moved) {
+        vscode.window.showWarningMessage('仅支持拖拽到 Collection 内 Request 进行排序或跨 Collection 插入。');
+        return;
+      }
+
+      this.refreshCollections();
+      vscode.window.setStatusBarMessage('已按拖拽位置调整请求顺序', 3000);
       return;
     }
 
@@ -470,8 +483,7 @@ export function activate(context: vscode.ExtensionContext) {
     context,
     dataStore,
     refreshCollections,
-    refreshHistory,
-    showInputDialog: showCustomInputDialog
+    refreshHistory
   };
 
   const envControllerDeps: EnvControllerDeps = {
@@ -486,7 +498,6 @@ export function activate(context: vscode.ExtensionContext) {
     refreshCollections,
     refreshCollectionsWithRetry,
     showInputDialog: showCustomInputDialog,
-    showStepwiseInputDialog,
     openRequestEditor: (request: RequestModel) => openRequestEditor(request, requestControllerDeps)
   };
 
@@ -495,7 +506,8 @@ export function activate(context: vscode.ExtensionContext) {
     refreshCollections,
     refreshEnvironments,
     refreshHistory,
-    showInputDialog: showCustomInputDialog
+    showInputDialog: showCustomInputDialog,
+    closeRequestEditorsByIds
   };
 
   const systemControllerDeps: SystemControllerDeps = {

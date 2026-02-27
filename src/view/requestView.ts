@@ -8,12 +8,20 @@ export interface EnvGroupOption {
   path: string;
 }
 
+export interface EnvVariableOption {
+  name: string;
+  value: string;
+}
+
+export type EnvGroupVariableMap = Record<string, EnvVariableOption[]>;
+
 export function renderRequestEditorHtml(
   request: RequestModel,
   collectionPath?: string,
-  envGroupOptions: EnvGroupOption[] = []
+  envGroupOptions: EnvGroupOption[] = [],
+  envGroupVariableMap: EnvGroupVariableMap = {}
 ): string {
-  return buildRequestEditorHtml(request, collectionPath, envGroupOptions);
+  return buildRequestEditorHtml(request, collectionPath, envGroupOptions, envGroupVariableMap);
 }
 
 export function renderResponseHtml(

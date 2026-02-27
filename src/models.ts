@@ -11,8 +11,10 @@ export interface KeyValueItem {
 export interface RequestModel {
   id: string;
   name: string;
+  description?: string;
   method: HttpMethod;
   url: string;
+  params?: KeyValueItem[];
   headers: Record<string, string>;
   body: string;
   bodyMode?: RequestBodyMode;

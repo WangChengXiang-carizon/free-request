@@ -327,6 +327,56 @@ export class DataStore {
     return true;
   }
 
+  moveRequestsBeforeTarget(requestIds: string[], targetRequestId: string): boolean {
+    const targetRequest = this.requests.find(request => request.id === targetRequestId);
+    if (!targetRequest?.collectionId) {
+      return false;
+    }
+
+    const targetCollection = this.collections.find(collection => collection.id === targetRequest.collectionId);
+    if (!targetCollection) {
+      return false;
+    }
+
+    const movingRequestIds = Array.from(new Set(requestIds)).filter(requestId => requestId !== targetRequestId);
+    if (movingRequestIds.length === 0) {
+      return false;
+    }
+
+    const movingRequests = movingRequestIds
+      .map(requestId => this.requests.find(request => request.id === requestId))
+      .filter((request): request is RequestModel => !!request);
+    if (movingRequests.length !== movingRequestIds.length) {
+      return false;
+    }
+
+    this.collections.forEach(collection => {
+      collection.requests = collection.requests.filter(requestId => !movingRequestIds.includes(requestId));
+    });
+
+    movingRequests.forEach(request => {
+      request.collectionId = targetRequest.collectionId;
+    });
+
+    const normalizedTargetOrder = targetCollection.requests.filter(requestId =>
+      this.requests.some(request => request.id === requestId)
+    );
+    const targetIndex = normalizedTargetOrder.indexOf(targetRequestId);
+    if (targetIndex === -1) {
+      return false;
+    }
+
+    const nextOrder = [
+      ...normalizedTargetOrder.slice(0, targetIndex),
+      ...movingRequestIds,
+      ...normalizedTargetOrder.slice(targetIndex)
+    ];
+
+    targetCollection.requests = nextOrder;
+    this.savePersistData();
+    return true;
+  }
+
   updateRequestStatus(id: string, status: number) {
     const request = this.requests.find(r => r.id === id);
     if (request) {
@@ -343,8 +393,10 @@ export class DataStore {
 
     const newRequestData: Omit<RequestModel, 'id'> = {
       name: `${sourceRequest.name} (Copy)`,
+      description: sourceRequest.description,
       method: sourceRequest.method,
       url: sourceRequest.url,
+      params: sourceRequest.params ? sourceRequest.params.map(item => ({ ...item })) : [],
       headers: { ...sourceRequest.headers },
       body: sourceRequest.body,
       bodyMode: sourceRequest.bodyMode,

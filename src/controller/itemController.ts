@@ -14,6 +14,28 @@ export interface ItemControllerDeps {
   refreshEnvironments: () => void;
   refreshHistory: () => void;
   showInputDialog: ShowInputDialog;
+  closeRequestEditorsByIds: (requestIds: string[]) => void;
+}
+
+function collectCollectionRequestIds(dataStore: DataStore, collectionId: string): string[] {
+  const targetCollectionIds = new Set<string>();
+  const stack = [collectionId];
+
+  while (stack.length > 0) {
+    const currentCollectionId = stack.pop();
+    if (!currentCollectionId || targetCollectionIds.has(currentCollectionId)) {
+      continue;
+    }
+
+    targetCollectionIds.add(currentCollectionId);
+    dataStore.collections
+      .filter(collection => collection.parentId === currentCollectionId)
+      .forEach(collection => stack.push(collection.id));
+  }
+
+  return dataStore.requests
+    .filter(request => request.collectionId && targetCollectionIds.has(request.collectionId))
+    .map(request => request.id);
 }
 
 export function registerItemCommands(deps: ItemControllerDeps): vscode.Disposable[] {
@@ -26,8 +48,11 @@ export function registerItemCommands(deps: ItemControllerDeps): vscode.Disposabl
       );
       if (confirm === '删除') {
         if (node.type === 'collection') {
+          const requestIds = collectCollectionRequestIds(deps.dataStore, node.id);
+          deps.closeRequestEditorsByIds(requestIds);
           deps.dataStore.deleteCollection(node.id);
         } else if (node.type === 'request') {
+          deps.closeRequestEditorsByIds([node.id]);
           deps.dataStore.deleteRequest(node.id);
         } else if (node.type === 'env_group') {
           deps.dataStore.deleteEnvGroup(node.id);

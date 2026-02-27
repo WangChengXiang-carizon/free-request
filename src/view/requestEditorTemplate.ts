@@ -1,5 +1,5 @@
 import type { RequestModel } from '../models';
-import type { EnvGroupOption } from './requestView';
+import type { EnvGroupOption, EnvGroupVariableMap } from './requestView';
 
 type KeyValueRow = {
   key: string;
@@ -37,9 +37,11 @@ function splitUrlAndParams(rawUrl: string): { baseUrl: string; params: KeyValueR
 export function buildRequestEditorHtml(
   request: RequestModel,
   collectionPath?: string,
-  envGroupOptions: EnvGroupOption[] = []
+  envGroupOptions: EnvGroupOption[] = [],
+  envGroupVariableMap: EnvGroupVariableMap = {}
 ): string {
-  const { baseUrl, params } = splitUrlAndParams(request.url);
+  const { params: urlParams } = splitUrlAndParams(request.url);
+  const params = Array.isArray(request.params) ? request.params : urlParams;
   const headerRows: KeyValueRow[] = Object.entries(request.headers).map(([key, value]) => ({
     key,
     value,
@@ -59,7 +61,7 @@ export function buildRequestEditorHtml(
     .method-select { width: 110px; }
     .url-input { flex: 1; }
     .action-group { margin-left: auto; display: flex; gap: 8px; align-items: center; }
-    .save-action-select { width: 120px; }
+    .save-action-wrap { display: flex; align-items: center; gap: 8px; }
     .name-row { margin-top: 10px; display: grid; grid-template-columns: 90px 1fr; gap: 8px; align-items: center; }
     .request-header { margin-bottom: 12px; }
     .request-header .name-row { margin-top: 0; }
@@ -71,6 +73,9 @@ export function buildRequestEditorHtml(
     .env-select { width: 220px; }
     .path-prefix { color: #666; white-space: nowrap; }
     .path-request-name { min-width: 120px; border: 0; outline: 0; background: transparent; padding: 0; margin: 0; font-size: 12px; font-weight: 600; color: #1f1f1f; }
+    .description-row { margin-top: 10px; }
+    .description-row label { display: block; margin-bottom: 6px; font-size: 12px; color: #666; }
+    .description-input { min-height: 72px; resize: vertical; }
     .tabs { margin-top: 12px; display: flex; border-bottom: 1px solid #d9d9d9; }
     .tab { padding: 8px 12px; cursor: pointer; font-size: 13px; border-bottom: 2px solid transparent; }
     .tab.active { border-bottom-color: #007acc; color: #007acc; font-weight: 600; }
@@ -188,6 +193,55 @@ export function buildRequestEditorHtml(
     .json-number { color: var(--vscode-debugTokenExpression-number, #b5cea8); font-weight: 600; }
     .json-boolean { color: var(--vscode-debugTokenExpression-boolean, #569cd6); font-weight: 700; }
     .json-null { color: var(--vscode-debugTokenExpression-value, #c586c0); font-style: normal; font-weight: 700; }
+    .var-suggest {
+      position: fixed;
+      z-index: 999;
+      min-width: 220px;
+      max-width: 420px;
+      max-height: 220px;
+      overflow: auto;
+      border: 1px solid var(--vscode-input-border, #cfcfcf);
+      border-radius: 6px;
+      background: var(--vscode-editorWidget-background, var(--vscode-editor-background, #ffffff));
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+      padding: 4px;
+    }
+    .var-suggest-item {
+      width: 100%;
+      border: 0;
+      background: transparent;
+      color: var(--vscode-foreground, inherit);
+      border-radius: 4px;
+      padding: 6px 8px;
+      cursor: pointer;
+      line-height: 1.4;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+    }
+    .var-suggest-name {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      white-space: nowrap;
+      color: var(--vscode-foreground, inherit);
+    }
+    .var-suggest-match {
+      font-weight: 700;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+    .var-suggest-value {
+      color: var(--vscode-descriptionForeground, #666);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+      text-align: right;
+    }
+    .var-suggest-item.active,
+    .var-suggest-item:hover {
+      background: var(--vscode-list-hoverBackground, #f1f3f5);
+    }
   </style>
 </head>
 <body>
@@ -198,11 +252,20 @@ export function buildRequestEditorHtml(
         <span class="path-prefix" id="pathPrefix"></span>
         <input type="text" id="pathRequestName" class="path-request-name" value="${escapeHtml(request.name)}" aria-label="请求名称">
       </div>
+      <div class="save-action-wrap">
+        <button class="btn" id="saveBtn" type="button">Save</button>
+        <button class="btn" id="saveAsBtn" type="button">Save As</button>
+      </div>
       <div class="env-select-wrap">
         <span class="env-select-label">Environment</span>
         <select id="envGroupSelect" class="env-select"></select>
       </div>
     </div>
+  </div>
+
+  <div class="description-row">
+    <label for="requestDescription">Description</label>
+    <textarea id="requestDescription" class="description-input" placeholder="为该请求添加说明（可选）">${escapeHtml(request.description ?? '')}</textarea>
   </div>
 
   <div class="topbar">
@@ -215,14 +278,9 @@ export function buildRequestEditorHtml(
       <option value="HEAD" ${request.method === 'HEAD' ? 'selected' : ''}>HEAD</option>
       <option value="OPTIONS" ${request.method === 'OPTIONS' ? 'selected' : ''}>OPTIONS</option>
     </select>
-    <input type="text" id="baseUrl" class="url-input" value="${escapeHtml(baseUrl)}" placeholder="https://api.example.com/resource">
+    <input type="text" id="baseUrl" class="url-input" value="${escapeHtml(request.url)}" placeholder="https://api.example.com/resource">
     <div class="action-group">
       <button class="btn btn-primary" id="sendBtn">Send</button>
-      <select id="saveActionSelect" class="save-action-select" aria-label="保存操作">
-        <option value="" selected disabled hidden>Save ▾</option>
-        <option value="save">Save</option>
-        <option value="saveAs">Save As</option>
-      </select>
       <button class="btn" id="codeBtn">Code</button>
     </div>
   </div>
@@ -348,6 +406,8 @@ export function buildRequestEditorHtml(
 
   <div class="hint">支持在 URL / Header / Body / Auth 中使用自定义环境变量。例如: {{HOST}}</div>
 
+  <div id="envVarSuggest" class="var-suggest hidden"></div>
+
   <div class="response-wrap">
     <div class="response-title">Response</div>
     <div id="responseEmpty" class="response-empty">点击 Send 后在此查看响应结果</div>
@@ -398,6 +458,7 @@ export function buildRequestEditorHtml(
     let requestName = ${toScriptJson(request.name)};
     const collectionPath = ${toScriptJson(normalizedCollectionPath)};
     const envGroupOptions = ${toScriptJson(envGroupOptions)};
+    const envGroupVariableMap = ${toScriptJson(envGroupVariableMap)};
     const initialEnvGroupId = ${toScriptJson(request.envGroupId ?? '')};
     const initialParams = ${toScriptJson(params)};
     const initialHeaders = ${toScriptJson(headerRows)};
@@ -409,6 +470,267 @@ export function buildRequestEditorHtml(
     let isResponseFindWidgetVisible = false;
     let lastResponseFindQuery = '';
     let lastResponseFindIndex = -1;
+    let autocompleteTargetEl = null;
+    let autocompleteTriggerIndex = -1;
+    let autocompleteCandidates = [];
+    let autocompleteActiveIndex = 0;
+    let autocompleteQuery = '';
+
+    function escapeHtmlForAutocomplete(input) {
+      return String(input)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function highlightAutocompleteMatch(text, query) {
+      const sourceText = String(text ?? '');
+      const normalizedQuery = String(query ?? '').trim();
+      if (!normalizedQuery) {
+        return escapeHtmlForAutocomplete(sourceText);
+      }
+
+      const lowerText = sourceText.toLowerCase();
+      const lowerQuery = normalizedQuery.toLowerCase();
+      const matchIndex = lowerText.indexOf(lowerQuery);
+      if (matchIndex < 0) {
+        return escapeHtmlForAutocomplete(sourceText);
+      }
+
+      const before = sourceText.slice(0, matchIndex);
+      const matched = sourceText.slice(matchIndex, matchIndex + normalizedQuery.length);
+      const after = sourceText.slice(matchIndex + normalizedQuery.length);
+      return (
+        escapeHtmlForAutocomplete(before)
+        + '<span class="var-suggest-match">'
+        + escapeHtmlForAutocomplete(matched)
+        + '</span>'
+        + escapeHtmlForAutocomplete(after)
+      );
+    }
+
+    function getAutocompletePopup() {
+      return document.getElementById('envVarSuggest');
+    }
+
+    function hideAutocompletePopup() {
+      const popupEl = getAutocompletePopup();
+      if (!popupEl) {
+        return;
+      }
+
+      popupEl.classList.add('hidden');
+      popupEl.innerHTML = '';
+      autocompleteCandidates = [];
+      autocompleteActiveIndex = 0;
+      autocompleteQuery = '';
+      autocompleteTriggerIndex = -1;
+      autocompleteTargetEl = null;
+    }
+
+    function getSelectedEnvVariables() {
+      const envGroupSelectEl = document.getElementById('envGroupSelect');
+      if (!envGroupSelectEl) {
+        return [];
+      }
+
+      const envGroupId = envGroupSelectEl.value || '';
+      const candidates = envGroupVariableMap?.[envGroupId] ?? [];
+      return Array.isArray(candidates) ? candidates : [];
+    }
+
+    function getAutocompleteContext(targetEl) {
+      if (!targetEl || typeof targetEl.value !== 'string') {
+        return null;
+      }
+
+      const cursor = typeof targetEl.selectionStart === 'number'
+        ? targetEl.selectionStart
+        : targetEl.value.length;
+      const beforeCursor = targetEl.value.slice(0, cursor);
+      const triggerIndex = beforeCursor.lastIndexOf('{{');
+      if (triggerIndex < 0) {
+        return null;
+      }
+
+      const query = beforeCursor.slice(triggerIndex + 2);
+      if (/\{|\}|\s/.test(query)) {
+        return null;
+      }
+
+      return {
+        cursor,
+        triggerIndex,
+        query
+      };
+    }
+
+    function positionAutocompletePopup(targetEl) {
+      const popupEl = getAutocompletePopup();
+      if (!popupEl || !targetEl) {
+        return;
+      }
+
+      const rect = targetEl.getBoundingClientRect();
+      popupEl.style.left = Math.max(8, rect.left) + 'px';
+      popupEl.style.top = Math.min(window.innerHeight - 40, rect.bottom + 4) + 'px';
+      popupEl.style.minWidth = Math.max(220, Math.floor(rect.width)) + 'px';
+    }
+
+    function applyAutocompleteCandidate(variableName) {
+      if (!autocompleteTargetEl || !variableName) {
+        return;
+      }
+
+      const targetEl = autocompleteTargetEl;
+      const context = getAutocompleteContext(targetEl);
+      const triggerIndex = context ? context.triggerIndex : autocompleteTriggerIndex;
+      if (triggerIndex < 0) {
+        hideAutocompletePopup();
+        return;
+      }
+
+      const cursor = typeof targetEl.selectionStart === 'number'
+        ? targetEl.selectionStart
+        : targetEl.value.length;
+      const before = targetEl.value.slice(0, triggerIndex);
+      const after = targetEl.value.slice(cursor);
+      const replacement = '{{' + variableName + '}}';
+
+      targetEl.value = before + replacement + after;
+      targetEl.focus();
+      const nextCursor = (before + replacement).length;
+      if (typeof targetEl.setSelectionRange === 'function') {
+        targetEl.setSelectionRange(nextCursor, nextCursor);
+      }
+      targetEl.dispatchEvent(new Event('input'));
+      hideAutocompletePopup();
+    }
+
+    function renderAutocompletePopup() {
+      const popupEl = getAutocompletePopup();
+      if (!popupEl || autocompleteCandidates.length === 0) {
+        hideAutocompletePopup();
+        return;
+      }
+
+      popupEl.innerHTML = '';
+      autocompleteCandidates.forEach((candidate, index) => {
+        const itemBtn = document.createElement('button');
+        itemBtn.type = 'button';
+        itemBtn.className = 'var-suggest-item';
+        itemBtn.classList.toggle('active', index === autocompleteActiveIndex);
+        const nameEl = document.createElement('span');
+        nameEl.className = 'var-suggest-name';
+        nameEl.innerHTML = '{{' + highlightAutocompleteMatch(candidate.name, autocompleteQuery) + '}}';
+
+        const valueEl = document.createElement('span');
+        valueEl.className = 'var-suggest-value';
+        valueEl.textContent = candidate.value ?? '';
+
+        itemBtn.appendChild(nameEl);
+        itemBtn.appendChild(valueEl);
+        itemBtn.addEventListener('mousedown', (event) => {
+          event.preventDefault();
+          applyAutocompleteCandidate(candidate.name);
+        });
+        popupEl.appendChild(itemBtn);
+      });
+
+      popupEl.classList.remove('hidden');
+      if (autocompleteTargetEl) {
+        positionAutocompletePopup(autocompleteTargetEl);
+      }
+    }
+
+    function updateAutocompleteForTarget(targetEl) {
+      if (!targetEl) {
+        hideAutocompletePopup();
+        return;
+      }
+
+      const context = getAutocompleteContext(targetEl);
+      if (!context) {
+        hideAutocompletePopup();
+        return;
+      }
+
+      const availableVariables = getSelectedEnvVariables();
+      if (availableVariables.length === 0) {
+        hideAutocompletePopup();
+        return;
+      }
+
+      const normalizedQuery = context.query.toLowerCase();
+      const matchedCandidates = availableVariables.filter(variable =>
+        variable.name.toLowerCase().includes(normalizedQuery)
+      );
+
+      if (matchedCandidates.length === 0) {
+        hideAutocompletePopup();
+        return;
+      }
+
+      autocompleteTargetEl = targetEl;
+      autocompleteTriggerIndex = context.triggerIndex;
+      autocompleteCandidates = matchedCandidates;
+      autocompleteActiveIndex = 0;
+      autocompleteQuery = context.query;
+      renderAutocompletePopup();
+    }
+
+    function handleAutocompleteKeydown(event) {
+      const popupEl = getAutocompletePopup();
+      if (!popupEl || popupEl.classList.contains('hidden') || autocompleteCandidates.length === 0) {
+        return;
+      }
+
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        autocompleteActiveIndex = (autocompleteActiveIndex + 1) % autocompleteCandidates.length;
+        renderAutocompletePopup();
+        return;
+      }
+
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        autocompleteActiveIndex = (autocompleteActiveIndex - 1 + autocompleteCandidates.length) % autocompleteCandidates.length;
+        renderAutocompletePopup();
+        return;
+      }
+
+      if (event.key === 'Enter' || event.key === 'Tab') {
+        event.preventDefault();
+        applyAutocompleteCandidate(autocompleteCandidates[autocompleteActiveIndex]?.name);
+        return;
+      }
+
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        hideAutocompletePopup();
+      }
+    }
+
+    function setupAutocompleteForElement(targetEl) {
+      if (!targetEl || targetEl.dataset.envAutocompleteBound === '1') {
+        return;
+      }
+
+      targetEl.dataset.envAutocompleteBound = '1';
+      targetEl.addEventListener('input', () => updateAutocompleteForTarget(targetEl));
+      targetEl.addEventListener('click', () => updateAutocompleteForTarget(targetEl));
+      targetEl.addEventListener('keydown', handleAutocompleteKeydown);
+      targetEl.addEventListener('blur', () => {
+        window.setTimeout(() => {
+          if (document.activeElement?.closest?.('#envVarSuggest')) {
+            return;
+          }
+          hideAutocompletePopup();
+        }, 80);
+      });
+    }
 
     function walkTextNodes(root) {
       const nodes = [];
@@ -563,7 +885,7 @@ export function buildRequestEditorHtml(
 
     const initialBodyItems = ${toScriptJson(request.bodyItems ?? [])};
 
-    function createRow(containerId, row) {
+    function createRow(containerId, row, onChanged) {
       const tbody = document.getElementById(containerId);
       if (!tbody) {
         return;
@@ -575,6 +897,11 @@ export function buildRequestEditorHtml(
       enabledInput.className = 'checkbox row-enabled';
       enabledInput.type = 'checkbox';
       enabledInput.checked = !!row.enabled;
+      enabledInput.addEventListener('change', () => {
+        if (typeof onChanged === 'function') {
+          onChanged();
+        }
+      });
       enabledTd.appendChild(enabledInput);
 
       const keyTd = document.createElement('td');
@@ -583,6 +910,11 @@ export function buildRequestEditorHtml(
       keyInput.type = 'text';
       keyInput.placeholder = 'Key';
       keyInput.value = row.key || '';
+      keyInput.addEventListener('input', () => {
+        if (typeof onChanged === 'function') {
+          onChanged();
+        }
+      });
       keyTd.appendChild(keyInput);
 
       const valueTd = document.createElement('td');
@@ -591,7 +923,14 @@ export function buildRequestEditorHtml(
       valueInput.type = 'text';
       valueInput.placeholder = 'Value';
       valueInput.value = row.value || '';
+      valueInput.addEventListener('input', () => {
+        if (typeof onChanged === 'function') {
+          onChanged();
+        }
+      });
       valueTd.appendChild(valueInput);
+      setupAutocompleteForElement(keyInput);
+      setupAutocompleteForElement(valueInput);
 
       const actionTd = document.createElement('td');
       actionTd.className = 'row-actions';
@@ -599,7 +938,12 @@ export function buildRequestEditorHtml(
       deleteBtn.className = 'btn row-delete';
       deleteBtn.type = 'button';
       deleteBtn.textContent = 'Del';
-      deleteBtn.addEventListener('click', () => tr.remove());
+      deleteBtn.addEventListener('click', () => {
+        tr.remove();
+        if (typeof onChanged === 'function') {
+          onChanged();
+        }
+      });
       actionTd.appendChild(deleteBtn);
 
       tr.appendChild(enabledTd);
@@ -607,6 +951,16 @@ export function buildRequestEditorHtml(
       tr.appendChild(valueTd);
       tr.appendChild(actionTd);
       tbody.appendChild(tr);
+    }
+
+    function replaceRows(containerId, rows, onChanged) {
+      const tbody = document.getElementById(containerId);
+      if (!tbody) {
+        return;
+      }
+
+      tbody.innerHTML = '';
+      rows.forEach((row) => createRow(containerId, row, onChanged));
     }
 
     function collectRows(containerId) {
@@ -633,16 +987,79 @@ export function buildRequestEditorHtml(
       return rows;
     }
 
-    function buildFinalUrl(baseUrl, paramsRows) {
-      const enabledRows = paramsRows.filter((r) => r.enabled && r.key);
-      if (enabledRows.length === 0) {
-        return baseUrl;
+    function parseUrlInput(rawUrl) {
+      const normalized = String(rawUrl || '').trim();
+      const hashIndex = normalized.indexOf('#');
+      const hash = hashIndex >= 0 ? normalized.slice(hashIndex) : '';
+      const urlWithoutHash = hashIndex >= 0 ? normalized.slice(0, hashIndex) : normalized;
+      const queryIndex = urlWithoutHash.indexOf('?');
+      const baseUrl = queryIndex >= 0 ? urlWithoutHash.slice(0, queryIndex) : urlWithoutHash;
+      const query = queryIndex >= 0 ? urlWithoutHash.slice(queryIndex + 1) : '';
+
+      const paramsRows = [];
+      if (query) {
+        const searchParams = new URLSearchParams(query);
+        searchParams.forEach((value, key) => {
+          paramsRows.push({
+            key,
+            value,
+            enabled: true
+          });
+        });
       }
 
+      return {
+        baseUrl,
+        hash,
+        paramsRows
+      };
+    }
+
+    function buildFinalUrl(baseUrl, hash, paramsRows) {
+      const enabledRows = paramsRows.filter((r) => r.enabled && r.key);
       const searchParams = new URLSearchParams();
       enabledRows.forEach((r) => searchParams.append(r.key, r.value));
       const query = searchParams.toString();
-      return query ? (baseUrl + '?' + query) : baseUrl;
+
+      if (!query) {
+        return baseUrl + hash;
+      }
+
+      if (!baseUrl) {
+        return '?' + query + hash;
+      }
+
+      return baseUrl + '?' + query + hash;
+    }
+
+    function ensureParamsRows(onChanged) {
+      const rows = collectRows('paramsBody');
+      if (rows.length === 0) {
+        createRow('paramsBody', { key: '', value: '', enabled: true }, onChanged);
+      }
+    }
+
+    function syncUrlFromParamsRows() {
+      const baseUrlEl = document.getElementById('baseUrl');
+      if (!baseUrlEl) {
+        return;
+      }
+
+      const parsedUrl = parseUrlInput(baseUrlEl.value);
+      const paramsRows = collectRows('paramsBody');
+      baseUrlEl.value = buildFinalUrl(parsedUrl.baseUrl, parsedUrl.hash, paramsRows);
+      ensureParamsRows(syncUrlFromParamsRows);
+    }
+
+    function syncParamsRowsFromUrl() {
+      const baseUrlEl = document.getElementById('baseUrl');
+      if (!baseUrlEl) {
+        return;
+      }
+
+      const parsedUrl = parseUrlInput(baseUrlEl.value);
+      replaceRows('paramsBody', parsedUrl.paramsRows, syncUrlFromParamsRows);
+      ensureParamsRows(syncUrlFromParamsRows);
     }
 
     function buildHeaders(headersRows) {
@@ -1246,13 +1663,14 @@ export function buildRequestEditorHtml(
       const bodyModeEl = document.getElementById('bodyMode');
       const bodyEl = document.getElementById('body');
       const baseUrlEl = document.getElementById('baseUrl');
+      const requestDescriptionEl = document.getElementById('requestDescription');
       const methodEl = document.getElementById('method');
       const authTypeEl = document.getElementById('authType');
       const authBearerTokenEl = document.getElementById('authBearerToken');
       const authBasicUsernameEl = document.getElementById('authBasicUsername');
       const authBasicPasswordEl = document.getElementById('authBasicPassword');
       const envGroupSelectEl = document.getElementById('envGroupSelect');
-      if (!bodyModeEl || !bodyEl || !baseUrlEl || !methodEl || !authTypeEl || !authBearerTokenEl || !authBasicUsernameEl || !authBasicPasswordEl || !envGroupSelectEl) {
+      if (!bodyModeEl || !bodyEl || !baseUrlEl || !requestDescriptionEl || !methodEl || !authTypeEl || !authBearerTokenEl || !authBasicUsernameEl || !authBasicPasswordEl || !envGroupSelectEl) {
         alert('编辑器初始化失败，请关闭后重新打开请求编辑页。');
         return null;
       }
@@ -1275,14 +1693,17 @@ export function buildRequestEditorHtml(
         }
       }
 
-      const finalUrl = buildFinalUrl(baseUrlEl.value.trim(), paramsRows);
+      const parsedUrl = parseUrlInput(baseUrlEl.value);
+      const finalUrl = buildFinalUrl(parsedUrl.baseUrl, parsedUrl.hash, paramsRows);
       const finalHeaders = buildHeaders(headersRows);
 
       return {
         id: requestId,
         name: requestName,
+        description: requestDescriptionEl.value,
         method: methodEl.value,
         url: finalUrl,
+        params: paramsRows,
         headers: finalHeaders,
         body: body,
         bodyMode: bodyMode,
@@ -1387,12 +1808,13 @@ export function buildRequestEditorHtml(
       });
     }
 
-    (Array.isArray(initialParams) ? initialParams : []).forEach((row) => createRow('paramsBody', row));
+    (Array.isArray(initialParams) ? initialParams : []).forEach((row) => createRow('paramsBody', row, syncUrlFromParamsRows));
     (Array.isArray(initialHeaders) ? initialHeaders : []).forEach((row) => createRow('headersBody', row));
     (Array.isArray(initialBodyItems) ? initialBodyItems : []).forEach((row) => createRow('bodyItemsBody', row));
-    if (initialParams.length === 0) createRow('paramsBody', { key: '', value: '', enabled: true });
+    if (initialParams.length === 0) createRow('paramsBody', { key: '', value: '', enabled: true }, syncUrlFromParamsRows);
     if (initialHeaders.length === 0) createRow('headersBody', { key: '', value: '', enabled: true });
     if (initialBodyItems.length === 0) createRow('bodyItemsBody', { key: '', value: '', enabled: true });
+    syncUrlFromParamsRows();
     populateEnvGroupSelect();
     try {
       toggleBodyMode();
@@ -1413,8 +1835,11 @@ export function buildRequestEditorHtml(
     const addParamBtn = document.getElementById('addParamBtn');
     const addHeaderBtn = document.getElementById('addHeaderBtn');
     const addBodyItemBtn = document.getElementById('addBodyItemBtn');
-    const saveActionSelect = document.getElementById('saveActionSelect');
+    const saveBtn = document.getElementById('saveBtn');
+    const saveAsBtn = document.getElementById('saveAsBtn');
     const codeBtn = document.getElementById('codeBtn');
+    const baseUrlEl = document.getElementById('baseUrl');
+    const requestDescriptionEl = document.getElementById('requestDescription');
     const bodyModeEl = document.getElementById('bodyMode');
     const bodyEl = document.getElementById('body');
     const copyRequestBodyBtn = document.getElementById('copyRequestBodyBtn');
@@ -1435,19 +1860,17 @@ export function buildRequestEditorHtml(
     const copyResponseBodyBtn = document.getElementById('copyResponseBodyBtn');
     const respPrettyBtn = document.getElementById('respPrettyBtn');
     const respRawBtn = document.getElementById('respRawBtn');
+    const authBearerTokenEl = document.getElementById('authBearerToken');
+    const authBasicUsernameEl = document.getElementById('authBasicUsername');
+    const authBasicPasswordEl = document.getElementById('authBasicPassword');
+    const envGroupSelectEl = document.getElementById('envGroupSelect');
 
-    addParamBtn?.addEventListener('click', () => createRow('paramsBody', { key: '', value: '', enabled: true }));
+    addParamBtn?.addEventListener('click', () => createRow('paramsBody', { key: '', value: '', enabled: true }, syncUrlFromParamsRows));
     addHeaderBtn?.addEventListener('click', () => createRow('headersBody', { key: '', value: '', enabled: true }));
     addBodyItemBtn?.addEventListener('click', () => createRow('bodyItemsBody', { key: '', value: '', enabled: true }));
-    saveActionSelect?.addEventListener('change', () => {
-      const action = saveActionSelect.value;
-      if (action === 'save') {
-        saveRequest();
-      } else if (action === 'saveAs') {
-        saveAsRequest();
-      }
-      saveActionSelect.selectedIndex = 0;
-    });
+    document.getElementById('baseUrl')?.addEventListener('input', syncParamsRowsFromUrl);
+    saveBtn?.addEventListener('click', () => saveRequest());
+    saveAsBtn?.addEventListener('click', () => saveAsRequest());
     codeBtn?.addEventListener('click', openCodePreview);
     bodyModeEl?.addEventListener('change', toggleBodyMode);
     bodyEl?.addEventListener('input', () => validateRawJson(false));
@@ -1603,6 +2026,23 @@ export function buildRequestEditorHtml(
 
     updateRequestPath();
     updateResponseBodyButtons();
+
+    setupAutocompleteForElement(baseUrlEl);
+    setupAutocompleteForElement(requestDescriptionEl);
+    setupAutocompleteForElement(bodyEl);
+    setupAutocompleteForElement(authBearerTokenEl);
+    setupAutocompleteForElement(authBasicUsernameEl);
+    setupAutocompleteForElement(authBasicPasswordEl);
+    envGroupSelectEl?.addEventListener('change', () => {
+      if (autocompleteTargetEl) {
+        updateAutocompleteForTarget(autocompleteTargetEl);
+      }
+    });
+    window.addEventListener('resize', () => {
+      if (autocompleteTargetEl) {
+        positionAutocompletePopup(autocompleteTargetEl);
+      }
+    });
 
     window.addEventListener('message', (event) => {
       const message = event.data;

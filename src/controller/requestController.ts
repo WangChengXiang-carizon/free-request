@@ -10,8 +10,7 @@ import type {
 } from '../models';
 import { parseRequestBody } from '../requestBodyParser';
 import { renderRequestEditorHtml, renderResponseHtml } from '../view/requestView';
-import type { ShowInputDialog } from '../view/input';
-import type { EnvGroupOption } from '../view/requestView';
+import type { EnvGroupOption, EnvGroupVariableMap } from '../view/requestView';
 
 interface CommandNode {
   type: string;
@@ -23,7 +22,6 @@ export interface RequestControllerDeps {
   dataStore: DataStore;
   refreshCollections: () => void;
   refreshHistory: () => void;
-  showInputDialog: ShowInputDialog;
 }
 
 interface SendRequestResult {
@@ -40,6 +38,39 @@ interface SendRequestResult {
 
 interface CollectionPickItem extends vscode.QuickPickItem {
   collectionId?: string;
+}
+
+const requestEditorPanels = new Map<string, Set<vscode.WebviewPanel>>();
+
+function registerRequestEditorPanel(requestId: string, panel: vscode.WebviewPanel) {
+  const existingPanels = requestEditorPanels.get(requestId) ?? new Set<vscode.WebviewPanel>();
+  existingPanels.add(panel);
+  requestEditorPanels.set(requestId, existingPanels);
+
+  panel.onDidDispose(() => {
+    const panels = requestEditorPanels.get(requestId);
+    if (!panels) {
+      return;
+    }
+
+    panels.delete(panel);
+    if (panels.size === 0) {
+      requestEditorPanels.delete(requestId);
+    }
+  });
+}
+
+export function closeRequestEditorsByIds(requestIds: string[]) {
+  requestIds.forEach(requestId => {
+    const panels = requestEditorPanels.get(requestId);
+    if (!panels) {
+      return;
+    }
+
+    const snapshot = Array.from(panels);
+    snapshot.forEach(panel => panel.dispose());
+    requestEditorPanels.delete(requestId);
+  });
 }
 
 export function registerRequestCommands(deps: RequestControllerDeps): vscode.Disposable[] {
@@ -80,9 +111,16 @@ export async function openRequestEditor(request: RequestModel, deps: RequestCont
     vscode.ViewColumn.One,
     { enableScripts: true, retainContextWhenHidden: true }
   );
+  registerRequestEditorPanel(request.id, panel);
 
   const envGroupOptions = buildEnvGroupOptions(deps.dataStore);
-  panel.webview.html = renderRequestEditorHtml(request, collectionPath, envGroupOptions);
+  const envGroupVariableMap = buildEnvGroupVariableMap(deps.dataStore);
+  panel.webview.html = renderRequestEditorHtml(
+    request,
+    collectionPath,
+    envGroupOptions,
+    envGroupVariableMap
+  );
   let hasShownEnvFallbackNotice = false;
 
   panel.webview.onDidReceiveMessage(async (message) => {
@@ -136,49 +174,16 @@ export async function openRequestEditor(request: RequestModel, deps: RequestCont
         break;
       }
       case 'saveAsRequest': {
-        const suggestedName = typeof message.data?.suggestedName === 'string' && message.data.suggestedName.trim()
-          ? message.data.suggestedName.trim()
-          : `${request.name} Copy`;
-
-        const saveAsName = await deps.showInputDialog(
-          '另存为请求',
-          '请输入另存为的新请求名称',
-          suggestedName,
-          value => value && value.trim() ? null : '名称不能为空',
-          suggestedName
-        );
-
-        if (!saveAsName || !saveAsName.trim()) {
-          break;
-        }
-
-        const normalizedSaveAsName = saveAsName.trim();
         const sourceRequest = deps.dataStore.requests.find(r => r.id === request.id) ?? request;
-
-        const collectionPickItems = buildCollectionPickItems(deps.dataStore, sourceRequest.collectionId);
-        const selectedCollection = await vscode.window.showQuickPick(collectionPickItems, {
-          title: '选择保存位置',
-          placeHolder: '选择要保存到的 Collection（可选根目录）'
-        });
-
-        if (!selectedCollection) {
-          break;
-        }
-
-        const targetCollectionId = selectedCollection.collectionId;
-        const hasDuplicateName = deps.dataStore.requests.some(existingRequest =>
-          existingRequest.name.trim().toLowerCase() === normalizedSaveAsName.toLowerCase()
-          && existingRequest.collectionId === targetCollectionId
-        );
-        if (hasDuplicateName) {
-          vscode.window.showErrorMessage(`另存为失败：目标位置已存在同名请求 "${normalizedSaveAsName}"`);
-          break;
-        }
+        const targetCollectionId = sourceRequest.collectionId;
+        const normalizedSaveAsName = getNextSaveAsRequestName(deps.dataStore, sourceRequest);
 
         const newRequest = deps.dataStore.addRequest({
           name: normalizedSaveAsName,
+          description: typeof message.data.description === 'string' ? message.data.description : '',
           method: message.data.method,
           url: message.data.url,
+          params: Array.isArray(message.data.params) ? message.data.params : [],
           headers: message.data.headers,
           body: message.data.body,
           bodyMode: message.data.bodyMode ?? 'raw',
@@ -365,8 +370,10 @@ function saveRequestData(requestId: string, messageData: Record<string, unknown>
   dataStore.requests[index] = {
     ...dataStore.requests[index],
     name: String(messageData.name ?? dataStore.requests[index].name),
+    description: String(messageData.description ?? dataStore.requests[index].description ?? ''),
     method: (messageData.method as RequestModel['method']) ?? dataStore.requests[index].method,
     url: String(messageData.url ?? dataStore.requests[index].url),
+    params: Array.isArray(messageData.params) ? messageData.params as KeyValueItem[] : [],
     headers: (messageData.headers as Record<string, string>) ?? dataStore.requests[index].headers,
     body: String(messageData.body ?? dataStore.requests[index].body ?? ''),
     bodyMode: (messageData.bodyMode as RequestBodyMode) ?? 'raw',
@@ -379,6 +386,30 @@ function saveRequestData(requestId: string, messageData: Record<string, unknown>
       ? messageData.envGroupId
       : undefined
   };
+}
+
+function getNextSaveAsRequestName(dataStore: DataStore, sourceRequest: RequestModel): string {
+  const baseName = `${sourceRequest.name} Copy`;
+  const targetCollectionId = sourceRequest.collectionId;
+
+  const usedNames = new Set(
+    dataStore.requests
+      .filter(request => request.collectionId === targetCollectionId)
+      .map(request => request.name.trim().toLowerCase())
+  );
+
+  if (!usedNames.has(baseName.trim().toLowerCase())) {
+    return baseName;
+  }
+
+  let suffix = 2;
+  while (true) {
+    const candidate = `${baseName} (${suffix})`;
+    if (!usedNames.has(candidate.trim().toLowerCase())) {
+      return candidate;
+    }
+    suffix += 1;
+  }
 }
 
 function showResponsePanel(
@@ -642,6 +673,33 @@ function buildEnvGroupPath(envGroupId: string, dataStore: DataStore): string {
   }
 
   return pathParts.join('/');
+}
+
+function buildEnvGroupVariableMap(dataStore: DataStore): EnvGroupVariableMap {
+  const map: EnvGroupVariableMap = {};
+
+  dataStore.environments.forEach(env => {
+    if (!env.groupId) {
+      return;
+    }
+
+    if (!map[env.groupId]) {
+      map[env.groupId] = [];
+    }
+
+    if (!map[env.groupId].some(item => item.name === env.name)) {
+      map[env.groupId].push({
+        name: env.name,
+        value: env.value
+      });
+    }
+  });
+
+  Object.keys(map).forEach(groupId => {
+    map[groupId].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'));
+  });
+
+  return map;
 }
 
 function buildCollectionPickItems(dataStore: DataStore, currentCollectionId?: string): CollectionPickItem[] {

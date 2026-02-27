@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { DataStore } from '../dataStore';
 import type { RequestModel } from '../models';
-import type { ShowInputDialog, ShowStepwiseInputDialog } from '../view/input';
+import type { ShowInputDialog } from '../view/input';
 
 interface CommandNode {
   type: string;
@@ -14,8 +14,32 @@ export interface CollectionControllerDeps {
   refreshCollections: () => void;
   refreshCollectionsWithRetry: () => void;
   showInputDialog: ShowInputDialog;
-  showStepwiseInputDialog: ShowStepwiseInputDialog;
   openRequestEditor: (request: RequestModel) => Promise<void>;
+}
+
+function getNextDefaultRequestName(dataStore: DataStore, collectionId?: string): string {
+  const baseName = '未命名请求';
+  const pattern = new RegExp(`^${baseName}(?:\\s+(\\d+))?$`);
+
+  const scopedRequests = dataStore.requests.filter(request => request.collectionId === collectionId);
+  const usedIndexes = new Set<number>();
+
+  scopedRequests.forEach(request => {
+    const match = request.name.trim().match(pattern);
+    if (!match) {
+      return;
+    }
+
+    const suffix = match[1];
+    usedIndexes.add(suffix ? Number(suffix) : 1);
+  });
+
+  let nextIndex = 1;
+  while (usedIndexes.has(nextIndex)) {
+    nextIndex += 1;
+  }
+
+  return nextIndex === 1 ? baseName : `${baseName} ${nextIndex}`;
 }
 
 export function registerCollectionCommands(deps: CollectionControllerDeps): vscode.Disposable[] {
@@ -54,47 +78,13 @@ export function registerCollectionCommands(deps: CollectionControllerDeps): vsco
         collectionId = node.id;
       }
 
-      const inputData = await deps.showStepwiseInputDialog<{
-        name: string;
-        method: string;
-        url: string;
-      }>({
-        name: {
-          title: '新建请求',
-          prompt: '请输入请求名称',
-          placeholder: '例如：获取用户信息',
-          validate: val => val ? null : '请求名称不能为空'
-        },
-        method: {
-          title: '选择请求方法',
-          prompt: '请选择HTTP请求方法',
-          placeholder: 'GET/POST/PUT/DELETE/PATCH/HEAD/OPTIONS',
-          validate: val => ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'].includes(val.toUpperCase())
-            ? null
-            : '请输入有效的HTTP方法：GET/POST/PUT/DELETE/PATCH/HEAD/OPTIONS',
-          defaultValue: 'GET'
-        },
-        url: {
-          title: '输入请求URL',
-          prompt: '请输入完整的请求URL',
-          placeholder: 'https://jsonplaceholder.typicode.com/todos/1',
-          validate: val => val.startsWith('http')
-            ? null
-            : '请输入有效的URL（以http开头）',
-          defaultValue: 'https://jsonplaceholder.typicode.com/todos/1'
-        }
-      });
-
-      if (!inputData) {
-        return;
-      }
-
-      const method = inputData.method.toUpperCase() as RequestModel['method'];
-
+      const defaultRequestName = getNextDefaultRequestName(deps.dataStore, collectionId);
       const newRequest = deps.dataStore.addRequest({
-        name: inputData.name,
-        method,
-        url: inputData.url,
+        name: defaultRequestName,
+        description: '',
+        method: 'GET',
+        url: 'https://example.com',
+        params: [],
         headers: { 'Content-Type': 'application/json' },
         body: '',
         bodyMode: 'raw',
