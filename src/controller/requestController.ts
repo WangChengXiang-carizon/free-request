@@ -6,6 +6,7 @@ import type {
   KeyValueItem,
   RequestAuthType,
   RequestBodyMode,
+  RequestRawType,
   RequestModel
 } from '../models';
 import { parseRequestBody } from '../requestBodyParser';
@@ -193,7 +194,11 @@ export async function openRequestEditor(request: RequestModel, deps: RequestCont
           headers: message.data.headers,
           body: message.data.body,
           bodyMode: message.data.bodyMode ?? 'raw',
+          rawType: message.data.rawType ?? 'json',
           bodyItems: Array.isArray(message.data.bodyItems) ? message.data.bodyItems : [],
+          binaryFilePath: typeof message.data.binaryFilePath === 'string' ? message.data.binaryFilePath : '',
+          graphQLQuery: typeof message.data.graphQLQuery === 'string' ? message.data.graphQLQuery : '',
+          graphQLVariables: typeof message.data.graphQLVariables === 'string' ? message.data.graphQLVariables : '',
           authType: message.data.authType ?? 'none',
           authBearerToken: message.data.authBearerToken ?? '',
           authBasicUsername: message.data.authBasicUsername ?? '',
@@ -205,6 +210,25 @@ export async function openRequestEditor(request: RequestModel, deps: RequestCont
         deps.refreshCollections();
         vscode.window.setStatusBarMessage(`已另存为新请求：${newRequest.name}`, 3000);
         await openRequestEditor(newRequest, deps);
+        break;
+      }
+      case 'browseBinaryFile': {
+        const pickResult = await vscode.window.showOpenDialog({
+          canSelectFiles: true,
+          canSelectMany: false,
+          canSelectFolders: false,
+          openLabel: '选择二进制文件'
+        });
+
+        const selectedPath = pickResult?.[0]?.fsPath;
+        if (!selectedPath) {
+          break;
+        }
+
+        panel.webview.postMessage({
+          command: 'binaryFileSelected',
+          data: { filePath: selectedPath }
+        });
         break;
       }
       case 'sendRequest': {
@@ -311,8 +335,11 @@ export async function sendRequest(
     }, {});
     const resolvedBodyText = resolveTemplateVariables(request.body || '', environmentMap);
     const bodyMode: RequestBodyMode = request.bodyMode ?? 'raw';
+    const rawType: RequestRawType = request.rawType ?? 'json';
     const authType: RequestAuthType = request.authType ?? 'none';
     const resolvedBodyItems = resolveKeyValueItems(request.bodyItems, environmentMap);
+    const resolvedGraphQLQuery = resolveTemplateVariables(request.graphQLQuery ?? '', environmentMap);
+    const resolvedGraphQLVariables = resolveTemplateVariables(request.graphQLVariables ?? '', environmentMap);
 
     const axiosConfig: AxiosRequestConfig = {
       method: request.method,
@@ -337,8 +364,10 @@ export async function sendRequest(
       };
     }
 
-    if (request.method !== 'GET') {
-      if (bodyMode === 'x-www-form-urlencoded') {
+    if (request.method !== 'GET' && request.method !== 'HEAD') {
+      if (bodyMode === 'none') {
+        delete axiosConfig.data;
+      } else if (bodyMode === 'x-www-form-urlencoded') {
         const params = new URLSearchParams();
         getEnabledKeyValueItems(resolvedBodyItems).forEach(item => {
           params.append(item.key, item.value);
@@ -355,10 +384,39 @@ export async function sendRequest(
         axiosConfig.data = formData;
         delete resolvedHeaders['Content-Type'];
         delete resolvedHeaders['content-type'];
-      } else {
-        axiosConfig.data = parseRequestBody(resolvedBodyText);
+      } else if (bodyMode === 'binary') {
+        const rawFilePath = resolveTemplateVariables(request.binaryFilePath ?? '', environmentMap).trim();
+        if (!rawFilePath) {
+          throw new Error('Binary 模式需要先选择文件');
+        }
+
+        const fileContent = await vscode.workspace.fs.readFile(vscode.Uri.file(rawFilePath));
+        axiosConfig.data = fileContent;
+        if (!resolvedHeaders['Content-Type']) {
+          resolvedHeaders['Content-Type'] = 'application/octet-stream';
+        }
+      } else if (bodyMode === 'graphql') {
+        const query = resolvedGraphQLQuery.trim();
+        if (!query) {
+          throw new Error('GraphQL 模式下 query 不能为空');
+        }
+
+        const variables = parseGraphQLVariables(resolvedGraphQLVariables);
+        axiosConfig.data = { query, variables };
         if (!resolvedHeaders['Content-Type']) {
           resolvedHeaders['Content-Type'] = 'application/json';
+        }
+      } else {
+        if (rawType === 'json') {
+          axiosConfig.data = parseRequestBody(resolvedBodyText);
+          if (!resolvedHeaders['Content-Type']) {
+            resolvedHeaders['Content-Type'] = 'application/json';
+          }
+        } else {
+          axiosConfig.data = resolvedBodyText;
+          if (!resolvedHeaders['Content-Type']) {
+            resolvedHeaders['Content-Type'] = getRawContentType(rawType);
+          }
         }
       }
     }
@@ -449,7 +507,11 @@ function saveRequestData(requestId: string, messageData: Record<string, unknown>
     headers: (messageData.headers as Record<string, string>) ?? dataStore.requests[index].headers,
     body: String(messageData.body ?? dataStore.requests[index].body ?? ''),
     bodyMode: (messageData.bodyMode as RequestBodyMode) ?? 'raw',
+    rawType: (messageData.rawType as RequestRawType) ?? 'json',
     bodyItems: Array.isArray(messageData.bodyItems) ? messageData.bodyItems as KeyValueItem[] : [],
+    binaryFilePath: String(messageData.binaryFilePath ?? ''),
+    graphQLQuery: String(messageData.graphQLQuery ?? ''),
+    graphQLVariables: String(messageData.graphQLVariables ?? ''),
     authType: (messageData.authType as RequestAuthType) ?? 'none',
     authBearerToken: String(messageData.authBearerToken ?? ''),
     authBasicUsername: String(messageData.authBasicUsername ?? ''),
@@ -557,6 +619,40 @@ function getEnabledKeyValueItems(items: KeyValueItem[]): KeyValueItem[] {
   return items.filter(item => item.enabled && item.key.trim() !== '');
 }
 
+function getRawContentType(rawType: RequestRawType): string {
+  switch (rawType) {
+    case 'text':
+      return 'text/plain';
+    case 'javascript':
+      return 'text/javascript';
+    case 'html':
+      return 'text/html';
+    case 'xml':
+      return 'application/xml';
+    case 'json':
+    default:
+      return 'application/json';
+  }
+}
+
+function parseGraphQLVariables(rawVariables: string): Record<string, unknown> {
+  const normalized = rawVariables.trim();
+  if (!normalized) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(normalized);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+    throw new Error('GraphQL Variables 必须是 JSON 对象');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'GraphQL Variables 必须是合法 JSON';
+    throw new Error(`GraphQL Variables 解析失败：${message}`);
+  }
+}
+
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'"'"'`)}'`;
 }
@@ -636,7 +732,11 @@ function buildCurlCommand(source: Record<string, unknown>, environmentMap: Recor
   const method = String(source.method ?? 'GET').toUpperCase();
   const url = resolveTemplateVariables(String(source.url ?? ''), environmentMap);
   const bodyMode = String(source.bodyMode ?? 'raw');
+  const rawType = String(source.rawType ?? 'json');
   const body = resolveTemplateVariables(String(source.body ?? ''), environmentMap);
+  const binaryFilePath = resolveTemplateVariables(String(source.binaryFilePath ?? ''), environmentMap).trim();
+  const graphQLQuery = resolveTemplateVariables(String(source.graphQLQuery ?? ''), environmentMap);
+  const graphQLVariables = resolveTemplateVariables(String(source.graphQLVariables ?? ''), environmentMap);
   const authType = String(source.authType ?? 'none');
   const authBearerToken = resolveTemplateVariables(String(source.authBearerToken ?? ''), environmentMap);
   const authBasicUsername = resolveTemplateVariables(String(source.authBasicUsername ?? ''), environmentMap);
@@ -663,7 +763,8 @@ function buildCurlCommand(source: Record<string, unknown>, environmentMap: Recor
   }
 
   if (method !== 'GET' && method !== 'HEAD') {
-    if (bodyMode === 'x-www-form-urlencoded') {
+    if (bodyMode === 'none') {
+    } else if (bodyMode === 'x-www-form-urlencoded') {
       const enabledItems = (Array.isArray(bodyItemsValue) ? bodyItemsValue : [])
         .filter(item => item && typeof item === 'object' && (item as { enabled?: boolean }).enabled !== false)
         .map(item => ({
@@ -687,8 +788,34 @@ function buildCurlCommand(source: Record<string, unknown>, environmentMap: Recor
       enabledItems.forEach(item => {
         lines.push(`  --form ${shellQuote(`${item.key}=${item.value}`)}`);
       });
+    } else if (bodyMode === 'binary') {
+      if (binaryFilePath) {
+        lines.push(`  --data-binary ${shellQuote(`@${binaryFilePath}`)}`);
+      }
+    } else if (bodyMode === 'graphql') {
+      const query = graphQLQuery.trim();
+      const variables = graphQLVariables.trim();
+      if (query) {
+        const payload = {
+          query,
+          variables: (() => {
+            if (!variables) {
+              return {};
+            }
+            try {
+              return JSON.parse(variables);
+            } catch {
+              return {};
+            }
+          })()
+        };
+        lines.push(`  --data-raw ${shellQuote(JSON.stringify(payload))}`);
+      }
     } else if (body.trim()) {
       lines.push(`  --data-raw ${shellQuote(body)}`);
+      if (rawType !== 'json') {
+        lines.push(`  --header ${shellQuote(`Content-Type: ${getRawContentType(rawType as RequestRawType)}`)}`);
+      }
     }
   }
 

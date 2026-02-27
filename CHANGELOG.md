@@ -6,6 +6,29 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-02-27
+
+### Added
+
+- 新增 Postman 风格 Body 类型：`none`、`form-data`、`x-www-form-urlencoded`、`raw`、`binary`、`GraphQL`
+- 新增 `raw` 子类型：`Text`、`JavaScript`、`JSON`、`HTML`、`XML`
+- 新增 `binary` 模式文件选择并支持以二进制内容发送
+- 新增 `GraphQL` 模式（`Query` + `Variables`），并校验 `Variables` 为合法 JSON 对象
+- 新增响应 Body 格式选择器：`Auto`、`JSON`、`XML`、`HTML`、`Text`
+- 新增响应区显式搜索按钮（请求编辑页与单独响应页）
+- 新增响应区“自动换行 / 不换行”切换按钮（请求编辑页与单独响应页）
+
+### Changed
+
+- Params 与 URL 同步时保留 `{{variable}}` 模板占位符，避免被 URL 编码后失效
+- 请求 Body 的 `Pretty/Raw` 扩展为支持 `raw + json/xml/html`
+
+### Fixed
+
+- 修复单独响应页将 JSON 响应误判为“非 JSON 响应”的问题
+- 修复单独响应页 JSON 高亮与请求编辑页规则不一致的问题
+- 修复请求编辑页脚本转义问题导致整页按钮不可点击的问题
+
 ## [0.1.0] - 2026-02-25
 
 ### Added

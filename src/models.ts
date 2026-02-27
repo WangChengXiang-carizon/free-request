@@ -1,6 +1,7 @@
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'HEAD' | 'OPTIONS';
 export type RequestAuthType = 'none' | 'bearer' | 'basic';
-export type RequestBodyMode = 'raw' | 'form-data' | 'x-www-form-urlencoded';
+export type RequestBodyMode = 'none' | 'raw' | 'form-data' | 'x-www-form-urlencoded' | 'binary' | 'graphql';
+export type RequestRawType = 'text' | 'javascript' | 'json' | 'html' | 'xml';
 
 export interface KeyValueItem {
   key: string;
@@ -18,7 +19,11 @@ export interface RequestModel {
   headers: Record<string, string>;
   body: string;
   bodyMode?: RequestBodyMode;
+  rawType?: RequestRawType;
   bodyItems?: KeyValueItem[];
+  binaryFilePath?: string;
+  graphQLQuery?: string;
+  graphQLVariables?: string;
   authType?: RequestAuthType;
   authBearerToken?: string;
   authBasicUsername?: string;

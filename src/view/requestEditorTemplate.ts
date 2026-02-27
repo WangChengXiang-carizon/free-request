@@ -41,6 +41,8 @@ export function buildRequestEditorHtml(
   envGroupVariableMap: EnvGroupVariableMap = {}
 ): string {
   const { params: urlParams } = splitUrlAndParams(request.url);
+  const selectedBodyMode = request.bodyMode ?? 'raw';
+  const selectedRawType = request.rawType ?? 'json';
   const params = Array.isArray(request.params) ? request.params : urlParams;
   const headerRows: KeyValueRow[] = Object.entries(request.headers).map(([key, value]) => ({
     key,
@@ -244,6 +246,10 @@ export function buildRequestEditorHtml(
       line-height: 1.5;
     }
     .response-empty { font-size: 12px; color: #666; }
+    .response-pre.no-wrap {
+      white-space: pre;
+      word-break: normal;
+    }
     #body,
     #respBody,
     #requestPrettyBody,
@@ -431,17 +437,36 @@ export function buildRequestEditorHtml(
     <div class="toolbar">
       <label for="bodyMode">Body Type</label>
       <select id="bodyMode">
-        <option value="raw" ${(request.bodyMode ?? 'raw') === 'raw' ? 'selected' : ''}>raw (JSON)</option>
-        <option value="form-data" ${(request.bodyMode ?? 'raw') === 'form-data' ? 'selected' : ''}>form-data</option>
-        <option value="x-www-form-urlencoded" ${(request.bodyMode ?? 'raw') === 'x-www-form-urlencoded' ? 'selected' : ''}>x-www-form-urlencoded</option>
+        <option value="none" ${selectedBodyMode === 'none' ? 'selected' : ''}>none</option>
+        <option value="form-data" ${selectedBodyMode === 'form-data' ? 'selected' : ''}>form-data</option>
+        <option value="x-www-form-urlencoded" ${selectedBodyMode === 'x-www-form-urlencoded' ? 'selected' : ''}>x-www-form-urlencoded</option>
+        <option value="raw" ${selectedBodyMode === 'raw' ? 'selected' : ''}>raw</option>
+        <option value="binary" ${selectedBodyMode === 'binary' ? 'selected' : ''}>binary</option>
+        <option value="graphql" ${selectedBodyMode === 'graphql' ? 'selected' : ''}>GraphQL</option>
       </select>
     </div>
+    <div id="noneBodySection" class="hidden">
+      <div class="hint">当前为 none 模式，请求不会携带 Body。</div>
+    </div>
     <div id="rawBodyContainer">
+      <div class="toolbar" id="rawTypeToolbar">
+        <label for="rawType">Raw Type</label>
+        <select id="rawType">
+          <option value="text" ${selectedRawType === 'text' ? 'selected' : ''}>Text</option>
+          <option value="javascript" ${selectedRawType === 'javascript' ? 'selected' : ''}>JavaScript</option>
+          <option value="json" ${selectedRawType === 'json' ? 'selected' : ''}>JSON</option>
+          <option value="html" ${selectedRawType === 'html' ? 'selected' : ''}>HTML</option>
+          <option value="xml" ${selectedRawType === 'xml' ? 'selected' : ''}>XML</option>
+        </select>
+      </div>
       <div id="rawBodyActions" class="toolbar">
         <button class="btn" id="requestBodyFullscreenBtn" type="button">全屏</button>
         <button class="btn" id="copyRequestBodyBtn" type="button">Copy Body</button>
         <button class="btn" id="requestBodyPrettyBtn" type="button">Pretty</button>
         <button class="btn" id="requestBodyRawBtn" type="button">Raw</button>
+        <div class="toolbar-spacer">
+          <button class="btn" id="requestBodySearchBtn" type="button">搜索</button>
+        </div>
         <span id="jsonStatus" class="json-status"></span>
       </div>
       <div id="rawBodySection" class="raw-body-wrap">
@@ -466,6 +491,22 @@ export function buildRequestEditorHtml(
       <textarea id="body" spellcheck="false" placeholder='请输入 JSON 请求体，例如 {"name":"free-request"}'>${escapeHtml(request.body || '')}</textarea>
       <pre id="requestPrettyBody" class="response-pre hidden"></pre>
       <div id="bodyResizeHandle" class="body-resize-handle" title="拖动调整 JSON 输入框高度"></div>
+      </div>
+    </div>
+    <div id="binaryBodySection" class="hidden">
+      <div class="toolbar">
+        <button class="btn" id="pickBinaryFileBtn" type="button">选择文件</button>
+      </div>
+      <input id="binaryFilePath" type="text" value="${escapeHtml(request.binaryFilePath ?? '')}" placeholder="请选择二进制文件路径">
+    </div>
+    <div id="graphqlBodySection" class="hidden">
+      <div class="name-row" style="margin-top:0; grid-template-columns: 90px 1fr;">
+        <label for="graphQLQuery">Query</label>
+        <textarea id="graphQLQuery" spellcheck="false" style="min-height: 160px; resize: vertical;" placeholder="query GetUser($id: ID!) { user(id: $id) { id name } }">${escapeHtml(request.graphQLQuery ?? '')}</textarea>
+      </div>
+      <div class="name-row" style="grid-template-columns: 90px 1fr; margin-top:8px;">
+        <label for="graphQLVariables">Variables</label>
+        <textarea id="graphQLVariables" spellcheck="false" style="min-height: 120px; resize: vertical;" placeholder='{"id":"1"}'>${escapeHtml(request.graphQLVariables ?? '')}</textarea>
       </div>
     </div>
     <div id="kvBodySection" class="hidden">
@@ -534,9 +575,20 @@ export function buildRequestEditorHtml(
         <div class="toolbar">
           <button class="btn" id="responseBodyFullscreenBtn" type="button">全屏</button>
           <button class="btn" id="copyResponseBodyBtn" type="button">Copy Body</button>
+          <button class="btn" id="respWrapToggleBtn" type="button">自动换行</button>
           <button class="btn" id="respPrettyBtn" type="button">Pretty</button>
           <button class="btn" id="respRawBtn" type="button">Raw</button>
+          <select id="respBodyFormat" style="width: 140px;">
+            <option value="auto">Auto</option>
+            <option value="json">JSON</option>
+            <option value="xml">XML</option>
+            <option value="html">HTML</option>
+            <option value="text">Text</option>
+          </select>
           <span id="respJsonHint" class="json-status"></span>
+          <div class="toolbar-spacer">
+            <button class="btn" id="responseBodySearchBtn" type="button">搜索</button>
+          </div>
         </div>
         <div class="response-body-wrap">
           <div id="respBodyResizeHandleTop" class="body-resize-handle" title="向上拖动可增大响应 Body 高度"></div>
@@ -571,10 +623,16 @@ export function buildRequestEditorHtml(
     const initialEnvGroupId = ${toScriptJson(request.envGroupId ?? '')};
     const initialParams = ${toScriptJson(params)};
     const initialHeaders = ${toScriptJson(headerRows)};
+    const initialRawType = ${toScriptJson(selectedRawType)};
+    const responseWrapStorageKey = 'freeRequestResponseWrapEnabled';
     let responseBodyRawText = '';
     let responseBodyPrettyText = '';
     let responseBodyIsJson = false;
     let responseBodyViewMode = 'pretty';
+    let responseBodyWrapEnabled = true;
+    let responseBodyFormatMode = 'auto';
+    let responseBodyDetectedFormat = 'text';
+    let responseBodyContentType = '';
     let requestBodyViewMode = 'raw';
     let isSendingRequest = false;
     let isFindWidgetVisible = false;
@@ -589,6 +647,18 @@ export function buildRequestEditorHtml(
     let autocompleteCandidates = [];
     let autocompleteActiveIndex = 0;
     let autocompleteQuery = '';
+
+    try {
+      const storedWrapState = window.localStorage.getItem(responseWrapStorageKey);
+      if (storedWrapState === 'false') {
+        responseBodyWrapEnabled = false;
+      }
+      if (storedWrapState === 'true') {
+        responseBodyWrapEnabled = true;
+      }
+    } catch {
+      // ignore localStorage read errors in restricted environments
+    }
 
     function escapeHtmlForAutocomplete(input) {
       return String(input)
@@ -1322,16 +1392,81 @@ export function buildRequestEditorHtml(
       jsonStatusEl.classList.toggle('error', !!isError);
     }
 
-    function updateRequestBodyButtons() {
+    function isRawJsonMode() {
       const bodyModeEl = document.getElementById('bodyMode');
+      const rawTypeEl = document.getElementById('rawType');
+      if (!bodyModeEl || !rawTypeEl) {
+        return false;
+      }
+      return bodyModeEl.value === 'raw' && rawTypeEl.value === 'json';
+    }
+
+    function updateRawBodyPlaceholder() {
       const bodyEl = document.getElementById('body');
-      const prettyBtn = document.getElementById('requestBodyPrettyBtn');
-      const rawBtn = document.getElementById('requestBodyRawBtn');
-      if (!bodyModeEl || !bodyEl || !prettyBtn || !rawBtn) {
+      const rawTypeEl = document.getElementById('rawType');
+      if (!bodyEl || !rawTypeEl) {
         return;
       }
 
-      if (bodyModeEl.value !== 'raw') {
+      const placeholders = {
+        text: '请输入 Text 请求体',
+        javascript: '请输入 JavaScript 文本请求体',
+        json: '请输入 JSON 请求体，例如 {"name":"free-request"}',
+        html: '请输入 HTML 请求体，例如 <html><body>...</body></html>',
+        xml: '请输入 XML 请求体，例如 <root><name>free-request</name></root>'
+      };
+      bodyEl.placeholder = placeholders[rawTypeEl.value] || placeholders.text;
+    }
+
+    function canUseRequestPrettyRaw(rawType) {
+      return rawType === 'json' || rawType === 'xml' || rawType === 'html';
+    }
+
+    function formatXmlLikeRequestText(rawText) {
+      const source = String(rawText || '').trim();
+      if (!source) {
+        return '';
+      }
+
+      const tokens = source.replace(/>\s*</g, '><').split(/(<[^>]+>)/g).filter(Boolean);
+      let indent = 0;
+      const lines = [];
+
+      tokens.forEach((token) => {
+        const piece = token.trim();
+        if (!piece) {
+          return;
+        }
+
+        const isClosingTag = /^<\\//.test(piece);
+        const isSelfClosingTag = /^<[^>]+\\/>$/.test(piece) || /^<\\?/.test(piece) || /^<!/.test(piece);
+        const isOpeningTag = /^<[^/!][^>]*>$/.test(piece);
+
+        if (isClosingTag) {
+          indent = Math.max(0, indent - 1);
+        }
+
+        lines.push('  '.repeat(indent) + piece);
+
+        if (isOpeningTag && !isSelfClosingTag && !isClosingTag) {
+          indent += 1;
+        }
+      });
+
+      return lines.join('\\n');
+    }
+
+    function updateRequestBodyButtons() {
+      const bodyModeEl = document.getElementById('bodyMode');
+      const rawTypeEl = document.getElementById('rawType');
+      const bodyEl = document.getElementById('body');
+      const prettyBtn = document.getElementById('requestBodyPrettyBtn');
+      const rawBtn = document.getElementById('requestBodyRawBtn');
+      if (!bodyModeEl || !rawTypeEl || !bodyEl || !prettyBtn || !rawBtn) {
+        return;
+      }
+
+      if (bodyModeEl.value !== 'raw' || !canUseRequestPrettyRaw(rawTypeEl.value)) {
         prettyBtn.disabled = true;
         rawBtn.disabled = true;
         return;
@@ -1344,12 +1479,14 @@ export function buildRequestEditorHtml(
         return;
       }
 
-      try {
-        JSON.parse(text);
-      } catch {
-        prettyBtn.disabled = true;
-        rawBtn.disabled = true;
-        return;
+      if (rawTypeEl.value === 'json') {
+        try {
+          JSON.parse(text);
+        } catch {
+          prettyBtn.disabled = true;
+          rawBtn.disabled = true;
+          return;
+        }
       }
 
       prettyBtn.disabled = requestBodyViewMode === 'pretty';
@@ -1358,20 +1495,26 @@ export function buildRequestEditorHtml(
 
     function updateRequestBodyView() {
       const bodyModeEl = document.getElementById('bodyMode');
+      const rawTypeEl = document.getElementById('rawType');
       const bodyEl = document.getElementById('body');
       const prettyBodyEl = document.getElementById('requestPrettyBody');
       const bodyResizeHandleEl = document.getElementById('bodyResizeHandle');
       const jsonFindReplaceEl = document.getElementById('jsonFindReplace');
-      if (!bodyModeEl || !bodyEl || !prettyBodyEl || !bodyResizeHandleEl || !jsonFindReplaceEl) {
+      if (!bodyModeEl || !rawTypeEl || !bodyEl || !prettyBodyEl || !bodyResizeHandleEl || !jsonFindReplaceEl) {
         return;
       }
 
       const isRawMode = bodyModeEl.value === 'raw';
+      const canUseJsonTools = isRawMode && rawTypeEl.value === 'json';
       bodyEl.classList.remove('hidden');
       prettyBodyEl.classList.add('hidden');
       bodyResizeHandleEl.classList.remove('hidden');
 
-      if (isRawMode && requestBodyViewMode === 'pretty') {
+      if (!canUseJsonTools || requestBodyViewMode === 'raw') {
+        updateJsonStatus('', false);
+      }
+
+      if (canUseJsonTools && requestBodyViewMode === 'pretty') {
         isFindWidgetVisible = false;
         jsonFindReplaceEl.classList.add('hidden');
       }
@@ -1379,12 +1522,13 @@ export function buildRequestEditorHtml(
 
     function validateRawJson(showSuccess) {
       const bodyModeEl = document.getElementById('bodyMode');
+      const rawTypeEl = document.getElementById('rawType');
       const bodyEl = document.getElementById('body');
-      if (!bodyModeEl || !bodyEl) {
+      if (!bodyModeEl || !rawTypeEl || !bodyEl) {
         return false;
       }
 
-      if (bodyModeEl.value !== 'raw') {
+      if (bodyModeEl.value !== 'raw' || rawTypeEl.value !== 'json') {
         updateJsonStatus('', false);
         return true;
       }
@@ -1408,8 +1552,9 @@ export function buildRequestEditorHtml(
 
     function prettyRawJsonBody() {
       const bodyModeEl = document.getElementById('bodyMode');
+      const rawTypeEl = document.getElementById('rawType');
       const bodyEl = document.getElementById('body');
-      if (!bodyModeEl || !bodyEl || bodyModeEl.value !== 'raw') {
+      if (!bodyModeEl || !rawTypeEl || !bodyEl || bodyModeEl.value !== 'raw' || !canUseRequestPrettyRaw(rawTypeEl.value)) {
         return;
       }
 
@@ -1419,25 +1564,35 @@ export function buildRequestEditorHtml(
         return;
       }
 
-      try {
-        const parsed = JSON.parse(text);
-        bodyEl.value = JSON.stringify(parsed, null, 2);
-        requestBodyViewMode = 'pretty';
-        updateJsonStatus('JSON 已美化', false);
-        updateRequestBodyView();
-        updateRequestBodyButtons();
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'JSON 格式错误';
-        updateJsonStatus('JSON 错误：' + message, true);
-        updateRequestBodyView();
-        updateRequestBodyButtons();
+      if (rawTypeEl.value === 'json') {
+        try {
+          const parsed = JSON.parse(text);
+          bodyEl.value = JSON.stringify(parsed, null, 2);
+          requestBodyViewMode = 'pretty';
+          updateJsonStatus('JSON 已美化', false);
+          updateRequestBodyView();
+          updateRequestBodyButtons();
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'JSON 格式错误';
+          updateJsonStatus('JSON 错误：' + message, true);
+          updateRequestBodyView();
+          updateRequestBodyButtons();
+        }
+        return;
       }
+
+      bodyEl.value = formatXmlLikeRequestText(text);
+      requestBodyViewMode = 'pretty';
+      updateJsonStatus('', false);
+      updateRequestBodyView();
+      updateRequestBodyButtons();
     }
 
     function rawRawJsonBody() {
       const bodyModeEl = document.getElementById('bodyMode');
+      const rawTypeEl = document.getElementById('rawType');
       const bodyEl = document.getElementById('body');
-      if (!bodyModeEl || !bodyEl || bodyModeEl.value !== 'raw') {
+      if (!bodyModeEl || !rawTypeEl || !bodyEl || bodyModeEl.value !== 'raw' || !canUseRequestPrettyRaw(rawTypeEl.value)) {
         return;
       }
 
@@ -1447,31 +1602,46 @@ export function buildRequestEditorHtml(
         return;
       }
 
-      try {
-        const parsed = JSON.parse(text);
-        bodyEl.value = JSON.stringify(parsed);
-        requestBodyViewMode = 'raw';
-        updateJsonStatus('JSON 已压缩', false);
-        updateRequestBodyView();
-        updateRequestBodyButtons();
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'JSON 格式错误';
-        updateJsonStatus('JSON 错误：' + message, true);
-        updateRequestBodyView();
-        updateRequestBodyButtons();
+      if (rawTypeEl.value === 'json') {
+        try {
+          const parsed = JSON.parse(text);
+          bodyEl.value = JSON.stringify(parsed);
+          requestBodyViewMode = 'raw';
+          updateJsonStatus('JSON 已压缩', false);
+          updateRequestBodyView();
+          updateRequestBodyButtons();
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'JSON 格式错误';
+          updateJsonStatus('JSON 错误：' + message, true);
+          updateRequestBodyView();
+          updateRequestBodyButtons();
+        }
+        return;
       }
+
+      bodyEl.value = text.replace(/\\n+/g, ' ').replace(/\\s{2,}/g, ' ').trim();
+      requestBodyViewMode = 'raw';
+      updateJsonStatus('', false);
+      updateRequestBodyView();
+      updateRequestBodyButtons();
     }
 
     function updateRawBodyActionsVisibility() {
       const bodyModeEl = document.getElementById('bodyMode');
+      const rawTypeEl = document.getElementById('rawType');
+      const rawTypeToolbarEl = document.getElementById('rawTypeToolbar');
       const rawBodyActionsEl = document.getElementById('rawBodyActions');
       const jsonFindReplaceEl = document.getElementById('jsonFindReplace');
-      if (!bodyModeEl || !rawBodyActionsEl || !jsonFindReplaceEl) {
+      if (!bodyModeEl || !rawTypeEl || !rawTypeToolbarEl || !rawBodyActionsEl || !jsonFindReplaceEl) {
         return;
       }
 
-      rawBodyActionsEl.classList.toggle('hidden', bodyModeEl.value !== 'raw');
-      if (bodyModeEl.value !== 'raw') {
+      const isRawMode = bodyModeEl.value === 'raw';
+      const isRawJson = isRawMode && rawTypeEl.value === 'json';
+
+      rawTypeToolbarEl.classList.toggle('hidden', !isRawMode);
+      rawBodyActionsEl.classList.toggle('hidden', !isRawMode);
+      if (!isRawJson) {
         isFindWidgetVisible = false;
         jsonFindReplaceEl.classList.add('hidden');
         updateJsonStatus('', false);
@@ -1484,10 +1654,11 @@ export function buildRequestEditorHtml(
 
     function showFindWidget() {
       const bodyModeEl = document.getElementById('bodyMode');
+      const rawTypeEl = document.getElementById('rawType');
       const bodyEl = document.getElementById('body');
       const findTextEl = document.getElementById('findText');
       const jsonFindReplaceEl = document.getElementById('jsonFindReplace');
-      if (!bodyModeEl || !bodyEl || !findTextEl || !jsonFindReplaceEl || bodyModeEl.value !== 'raw') {
+      if (!bodyModeEl || !rawTypeEl || !bodyEl || !findTextEl || !jsonFindReplaceEl || bodyModeEl.value !== 'raw' || rawTypeEl.value !== 'json') {
         return;
       }
 
@@ -1767,19 +1938,153 @@ export function buildRequestEditorHtml(
       }
     }
 
+    function normalizeResponseFormat(format) {
+      const normalized = String(format || '').trim().toLowerCase();
+      if (normalized === 'json' || normalized === 'xml' || normalized === 'html' || normalized === 'text' || normalized === 'auto') {
+        return normalized;
+      }
+      return 'auto';
+    }
+
+    function detectResponseBodyFormat(rawText, contentType) {
+      const lowerContentType = String(contentType || '').toLowerCase();
+      const trimmed = String(rawText || '').trim();
+
+      if (lowerContentType.includes('json')) {
+        return 'json';
+      }
+      if (lowerContentType.includes('html')) {
+        return 'html';
+      }
+      if (lowerContentType.includes('xml')) {
+        return 'xml';
+      }
+      if (lowerContentType.startsWith('text/')) {
+        return 'text';
+      }
+
+      if (trimmed) {
+        try {
+          JSON.parse(trimmed);
+          return 'json';
+        } catch {
+          const lowerTrimmed = trimmed.toLowerCase();
+          if (lowerTrimmed.startsWith('<!doctype html') || lowerTrimmed.startsWith('<html')) {
+            return 'html';
+          }
+          if (trimmed.startsWith('<') && trimmed.endsWith('>')) {
+            return 'xml';
+          }
+        }
+      }
+
+      return 'text';
+    }
+
+    function extractContentTypeFromHeadersText(headersText) {
+      if (!headersText) {
+        return '';
+      }
+
+      try {
+        const parsed = JSON.parse(headersText);
+        if (!parsed || typeof parsed !== 'object') {
+          return '';
+        }
+
+        const entries = Object.entries(parsed);
+        const matched = entries.find(([key]) => String(key).toLowerCase() === 'content-type');
+        return matched ? String(matched[1] || '') : '';
+      } catch {
+        return '';
+      }
+    }
+
+    function formatXmlLikeText(rawText) {
+      const source = String(rawText || '').trim();
+      if (!source) {
+        return '';
+      }
+
+      const tokens = source.replace(/>\s*</g, '><').split(/(<[^>]+>)/g).filter(Boolean);
+      let indent = 0;
+      const lines = [];
+
+      tokens.forEach((token) => {
+        const piece = token.trim();
+        if (!piece) {
+          return;
+        }
+
+        const isClosingTag = /^<\\//.test(piece);
+        const isSelfClosingTag = /^<[^>]+\\/>$/.test(piece) || /^<\\?/.test(piece) || /^<!/.test(piece);
+        const isOpeningTag = /^<[^/!][^>]*>$/.test(piece);
+
+        if (isClosingTag) {
+          indent = Math.max(0, indent - 1);
+        }
+
+        lines.push('  '.repeat(indent) + piece);
+
+        if (isOpeningTag && !isSelfClosingTag && !isClosingTag) {
+          indent += 1;
+        }
+      });
+
+      return lines.join('\\n');
+    }
+
+    function buildResponsePrettyText(rawText, format) {
+      const normalized = String(rawText || '');
+      if (!normalized.trim()) {
+        return '';
+      }
+
+      if (format === 'json') {
+        const parsed = tryParseJsonText(normalized);
+        return parsed.ok ? JSON.stringify(parsed.value, null, 2) : normalized;
+      }
+      if (format === 'xml' || format === 'html') {
+        return formatXmlLikeText(normalized);
+      }
+      return normalized;
+    }
+
+    function getEffectiveResponseFormat() {
+      return responseBodyFormatMode === 'auto'
+        ? responseBodyDetectedFormat
+        : responseBodyFormatMode;
+    }
+
     function updateResponseBodyButtons() {
       const copyBtn = document.getElementById('copyResponseBodyBtn');
+      const wrapBtn = document.getElementById('respWrapToggleBtn');
       const prettyBtn = document.getElementById('respPrettyBtn');
       const rawBtn = document.getElementById('respRawBtn');
+      const formatSelectEl = document.getElementById('respBodyFormat');
       const hintEl = document.getElementById('respJsonHint');
-      if (!copyBtn || !prettyBtn || !rawBtn || !hintEl) {
+      if (!copyBtn || !wrapBtn || !prettyBtn || !rawBtn || !formatSelectEl || !hintEl) {
         return;
       }
 
+      const hasBody = !!responseBodyRawText;
+      const effectiveFormat = getEffectiveResponseFormat();
       copyBtn.disabled = !responseBodyRawText;
-      prettyBtn.disabled = !responseBodyIsJson || responseBodyViewMode === 'pretty';
-      rawBtn.disabled = !responseBodyIsJson || responseBodyViewMode === 'raw';
-      hintEl.textContent = responseBodyIsJson ? 'JSON 响应，支持 Pretty/Raw 视图' : '非 JSON 响应';
+      wrapBtn.disabled = !hasBody;
+      wrapBtn.textContent = responseBodyWrapEnabled ? '自动换行' : '不换行';
+      prettyBtn.disabled = !hasBody || responseBodyViewMode === 'pretty';
+      rawBtn.disabled = !hasBody || responseBodyViewMode === 'raw';
+      formatSelectEl.value = normalizeResponseFormat(responseBodyFormatMode);
+
+      if (!hasBody) {
+        hintEl.textContent = '暂无响应内容';
+        return;
+      }
+
+      const formatLabel = responseBodyFormatMode === 'auto'
+        ? 'Auto (' + String(effectiveFormat).toUpperCase() + ')'
+        : String(effectiveFormat).toUpperCase();
+      hintEl.textContent = '响应格式：' + formatLabel;
     }
 
     function escapeHtmlForDisplay(input) {
@@ -1841,21 +2146,23 @@ export function buildRequestEditorHtml(
         return;
       }
 
-      const shouldUsePretty = responseBodyIsJson && responseBodyViewMode === 'pretty';
-      const selectedText = shouldUsePretty ? responseBodyPrettyText : responseBodyRawText;
-      if (responseBodyIsJson) {
-        if (shouldUsePretty) {
+      const shouldUsePretty = responseBodyViewMode === 'pretty';
+      const effectiveFormat = getEffectiveResponseFormat();
+      if (shouldUsePretty) {
+        responseBodyPrettyText = buildResponsePrettyText(responseBodyRawText, effectiveFormat);
+        if (effectiveFormat === 'json') {
           try {
-            bodyEl.innerHTML = renderJsonValue(JSON.parse(selectedText), 0);
+            bodyEl.innerHTML = renderJsonValue(JSON.parse(responseBodyPrettyText), 0);
           } catch {
-            bodyEl.textContent = selectedText;
+            bodyEl.textContent = responseBodyPrettyText;
           }
         } else {
-          bodyEl.textContent = selectedText;
+          bodyEl.textContent = responseBodyPrettyText;
         }
       } else {
-        bodyEl.textContent = selectedText;
+        bodyEl.textContent = responseBodyRawText;
       }
+      bodyEl.classList.toggle('no-wrap', !responseBodyWrapEnabled);
       updateResponseBodyButtons();
     }
 
@@ -1881,16 +2188,21 @@ export function buildRequestEditorHtml(
 
       if (payload.ok) {
         responseBodyRawText = payload.bodyText || '';
-        const parsedBody = tryParseJsonText(responseBodyRawText);
-        responseBodyIsJson = parsedBody.ok;
-        responseBodyPrettyText = parsedBody.ok ? JSON.stringify(parsedBody.value, null, 2) : '';
+        responseBodyContentType = extractContentTypeFromHeadersText(payload.headersText || '');
+        responseBodyDetectedFormat = detectResponseBodyFormat(responseBodyRawText, responseBodyContentType);
+        responseBodyIsJson = responseBodyDetectedFormat === 'json';
+        responseBodyPrettyText = buildResponsePrettyText(responseBodyRawText, responseBodyDetectedFormat);
+        responseBodyFormatMode = 'auto';
         responseBodyViewMode = 'pretty';
         updateResponseBodyView();
         headersEl.textContent = payload.headersText || '';
       } else {
         responseBodyRawText = payload.errorMessage || '请求失败';
-        responseBodyPrettyText = '';
+        responseBodyContentType = '';
+        responseBodyDetectedFormat = 'text';
+        responseBodyPrettyText = responseBodyRawText;
         responseBodyIsJson = false;
+        responseBodyFormatMode = 'text';
         responseBodyViewMode = 'raw';
         updateResponseBodyView();
         headersEl.textContent = '';
@@ -1902,17 +2214,28 @@ export function buildRequestEditorHtml(
     function toggleBodyMode() {
       const modeEl = document.getElementById('bodyMode');
       const rawSection = document.getElementById('rawBodySection');
+      const rawContainer = document.getElementById('rawBodyContainer');
+      const noneSection = document.getElementById('noneBodySection');
+      const binarySection = document.getElementById('binaryBodySection');
+      const graphqlSection = document.getElementById('graphqlBodySection');
       const kvSection = document.getElementById('kvBodySection');
-      if (!modeEl || !rawSection || !kvSection) {
+      if (!modeEl || !rawSection || !rawContainer || !noneSection || !binarySection || !graphqlSection || !kvSection) {
         return;
       }
 
       const mode = modeEl.value;
+      rawContainer.classList.toggle('hidden', mode !== 'raw');
       rawSection.classList.toggle('hidden', mode !== 'raw');
-      kvSection.classList.toggle('hidden', mode === 'raw');
+      noneSection.classList.toggle('hidden', mode !== 'none');
+      binarySection.classList.toggle('hidden', mode !== 'binary');
+      graphqlSection.classList.toggle('hidden', mode !== 'graphql');
+      kvSection.classList.toggle('hidden', mode !== 'form-data' && mode !== 'x-www-form-urlencoded');
       updateRawBodyActionsVisibility();
+      updateRawBodyPlaceholder();
       if (mode === 'raw') {
         validateRawJson(false);
+      } else {
+        updateJsonStatus('', false);
       }
     }
 
@@ -1931,7 +2254,11 @@ export function buildRequestEditorHtml(
 
     function buildRequestData() {
       const bodyModeEl = document.getElementById('bodyMode');
+      const rawTypeEl = document.getElementById('rawType');
       const bodyEl = document.getElementById('body');
+      const binaryFilePathEl = document.getElementById('binaryFilePath');
+      const graphQLQueryEl = document.getElementById('graphQLQuery');
+      const graphQLVariablesEl = document.getElementById('graphQLVariables');
       const baseUrlEl = document.getElementById('baseUrl');
       const requestDescriptionEl = document.getElementById('requestDescription');
       const methodEl = document.getElementById('method');
@@ -1940,18 +2267,22 @@ export function buildRequestEditorHtml(
       const authBasicUsernameEl = document.getElementById('authBasicUsername');
       const authBasicPasswordEl = document.getElementById('authBasicPassword');
       const envGroupSelectEl = document.getElementById('envGroupSelect');
-      if (!bodyModeEl || !bodyEl || !baseUrlEl || !requestDescriptionEl || !methodEl || !authTypeEl || !authBearerTokenEl || !authBasicUsernameEl || !authBasicPasswordEl || !envGroupSelectEl) {
+      if (!bodyModeEl || !rawTypeEl || !bodyEl || !binaryFilePathEl || !graphQLQueryEl || !graphQLVariablesEl || !baseUrlEl || !requestDescriptionEl || !methodEl || !authTypeEl || !authBearerTokenEl || !authBasicUsernameEl || !authBasicPasswordEl || !envGroupSelectEl) {
         alert('编辑器初始化失败，请关闭后重新打开请求编辑页。');
         return null;
       }
 
       const bodyMode = bodyModeEl.value;
+      const rawType = rawTypeEl.value;
       const body = bodyEl.value;
+      const binaryFilePath = binaryFilePathEl.value;
+      const graphQLQuery = graphQLQueryEl.value;
+      const graphQLVariables = graphQLVariablesEl.value;
       const paramsRows = collectRows('paramsBody');
       const headersRows = collectRows('headersBody');
       const bodyItemsRows = collectRows('bodyItemsBody');
 
-      if (bodyMode === 'raw' && body && body.trim() !== '') {
+      if (bodyMode === 'raw' && rawType === 'json' && body && body.trim() !== '') {
         try {
           JSON.parse(body);
         } catch (error) {
@@ -1959,6 +2290,18 @@ export function buildRequestEditorHtml(
           switchTab('body');
           updateJsonStatus('JSON 错误：' + message, true);
           bodyEl.focus();
+          return null;
+        }
+      }
+
+      if (bodyMode === 'graphql' && graphQLVariables.trim() !== '') {
+        try {
+          JSON.parse(graphQLVariables);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'JSON 格式错误';
+          switchTab('body');
+          alert('GraphQL Variables 必须是合法 JSON：' + message);
+          graphQLVariablesEl.focus();
           return null;
         }
       }
@@ -1977,7 +2320,11 @@ export function buildRequestEditorHtml(
         headers: finalHeaders,
         body: body,
         bodyMode: bodyMode,
+        rawType: rawType,
         bodyItems: bodyItemsRows,
+        binaryFilePath: binaryFilePath,
+        graphQLQuery: graphQLQuery,
+        graphQLVariables: graphQLVariables,
         authType: authTypeEl.value,
         authBearerToken: authBearerTokenEl.value,
         authBasicUsername: authBasicUsernameEl.value,
@@ -2170,12 +2517,19 @@ export function buildRequestEditorHtml(
     const baseUrlEl = document.getElementById('baseUrl');
     const requestDescriptionEl = document.getElementById('requestDescription');
     const bodyModeEl = document.getElementById('bodyMode');
+    const rawTypeEl = document.getElementById('rawType');
     const bodyEl = document.getElementById('body');
+    const binaryFilePathEl = document.getElementById('binaryFilePath');
+    const pickBinaryFileBtn = document.getElementById('pickBinaryFileBtn');
+    const graphQLQueryEl = document.getElementById('graphQLQuery');
+    const graphQLVariablesEl = document.getElementById('graphQLVariables');
     const copyRequestBodyBtn = document.getElementById('copyRequestBodyBtn');
     const requestBodyPrettyBtn = document.getElementById('requestBodyPrettyBtn');
     const requestBodyRawBtn = document.getElementById('requestBodyRawBtn');
     const requestBodyFullscreenBtn = document.getElementById('requestBodyFullscreenBtn');
+    const requestBodySearchBtn = document.getElementById('requestBodySearchBtn');
     const responseBodyFullscreenBtn = document.getElementById('responseBodyFullscreenBtn');
+    const responseBodySearchBtn = document.getElementById('responseBodySearchBtn');
     const findTextEl = document.getElementById('findText');
     const replaceTextEl = document.getElementById('replaceText');
     const findPrevBtn = document.getElementById('findPrevBtn');
@@ -2190,8 +2544,10 @@ export function buildRequestEditorHtml(
     const authTypeEl = document.getElementById('authType');
     const pathRequestNameEl = document.getElementById('pathRequestName');
     const copyResponseBodyBtn = document.getElementById('copyResponseBodyBtn');
+    const respWrapToggleBtn = document.getElementById('respWrapToggleBtn');
     const respPrettyBtn = document.getElementById('respPrettyBtn');
     const respRawBtn = document.getElementById('respRawBtn');
+    const respBodyFormatEl = document.getElementById('respBodyFormat');
     const authBearerTokenEl = document.getElementById('authBearerToken');
     const authBasicUsernameEl = document.getElementById('authBasicUsername');
     const authBasicPasswordEl = document.getElementById('authBasicPassword');
@@ -2205,11 +2561,20 @@ export function buildRequestEditorHtml(
     saveAsBtn?.addEventListener('click', () => saveAsRequest());
     codeBtn?.addEventListener('click', openCodePreview);
     bodyModeEl?.addEventListener('change', toggleBodyMode);
+    rawTypeEl?.addEventListener('change', () => {
+      requestBodyViewMode = 'raw';
+      updateRawBodyPlaceholder();
+      validateRawJson(false);
+      updateRawBodyActionsVisibility();
+    });
     bodyEl?.addEventListener('input', () => {
       requestBodyViewMode = 'raw';
       validateRawJson(false);
       updateRequestBodyView();
       updateRequestBodyButtons();
+    });
+    pickBinaryFileBtn?.addEventListener('click', () => {
+      vscode.postMessage({ command: 'browseBinaryFile', data: { id: requestId } });
     });
     copyRequestBodyBtn?.addEventListener('click', () => {
       const text = bodyEl?.value || '';
@@ -2225,9 +2590,17 @@ export function buildRequestEditorHtml(
       const rawBodyContainer = document.getElementById('rawBodyContainer');
       toggleFullscreenPanel(rawBodyContainer, requestBodyFullscreenBtn);
     });
+    requestBodySearchBtn?.addEventListener('click', () => {
+      switchTab('body');
+      showFindWidget();
+    });
     responseBodyFullscreenBtn?.addEventListener('click', () => {
       const responseBodyPanel = document.getElementById('resp-panel-body');
       toggleFullscreenPanel(responseBodyPanel, responseBodyFullscreenBtn);
+    });
+    responseBodySearchBtn?.addEventListener('click', () => {
+      switchResponseTab('body');
+      showResponseFindWidget();
     });
     requestBodyPrettyBtn?.addEventListener('click', prettyRawJsonBody);
     requestBodyRawBtn?.addEventListener('click', rawRawJsonBody);
@@ -2280,7 +2653,8 @@ export function buildRequestEditorHtml(
         }
 
         const bodyModeEl = document.getElementById('bodyMode');
-        if (bodyModeEl?.value !== 'raw') {
+        const rawTypeEl = document.getElementById('rawType');
+        if (bodyModeEl?.value !== 'raw' || rawTypeEl?.value !== 'json') {
           return;
         }
         event.preventDefault();
@@ -2319,12 +2693,25 @@ export function buildRequestEditorHtml(
         }
       });
     });
+    respWrapToggleBtn?.addEventListener('click', () => {
+      responseBodyWrapEnabled = !responseBodyWrapEnabled;
+      try {
+        window.localStorage.setItem(responseWrapStorageKey, responseBodyWrapEnabled ? 'true' : 'false');
+      } catch {
+        // ignore localStorage write errors in restricted environments
+      }
+      updateResponseBodyView();
+    });
     respPrettyBtn?.addEventListener('click', () => {
       responseBodyViewMode = 'pretty';
       updateResponseBodyView();
     });
     respRawBtn?.addEventListener('click', () => {
       responseBodyViewMode = 'raw';
+      updateResponseBodyView();
+    });
+    respBodyFormatEl?.addEventListener('change', () => {
+      responseBodyFormatMode = normalizeResponseFormat(respBodyFormatEl.value);
       updateResponseBodyView();
     });
     pathRequestNameEl?.addEventListener('blur', commitRequestNameRename);
@@ -2383,6 +2770,12 @@ export function buildRequestEditorHtml(
     });
 
     updateRequestPath();
+    if (rawTypeEl) {
+      rawTypeEl.value = initialRawType || 'json';
+    }
+    if (respBodyFormatEl) {
+      respBodyFormatEl.value = normalizeResponseFormat(responseBodyFormatMode);
+    }
     updateResponseBodyButtons();
     updateRequestBodyView();
     updateRequestBodyButtons();
@@ -2391,6 +2784,9 @@ export function buildRequestEditorHtml(
     setupAutocompleteForElement(baseUrlEl);
     setupAutocompleteForElement(requestDescriptionEl);
     setupAutocompleteForElement(bodyEl);
+    setupAutocompleteForElement(binaryFilePathEl);
+    setupAutocompleteForElement(graphQLQueryEl);
+    setupAutocompleteForElement(graphQLVariablesEl);
     setupAutocompleteForElement(authBearerTokenEl);
     setupAutocompleteForElement(authBasicUsernameEl);
     setupAutocompleteForElement(authBasicPasswordEl);
@@ -2415,6 +2811,12 @@ export function buildRequestEditorHtml(
         if (message && message.command === 'requestNameUpdated' && typeof message.data?.name === 'string') {
           requestName = message.data.name;
           updateRequestPath();
+          return;
+        }
+        if (message && message.command === 'binaryFileSelected' && typeof message.data?.filePath === 'string') {
+          if (binaryFilePathEl) {
+            binaryFilePathEl.value = message.data.filePath;
+          }
           return;
         }
         return;

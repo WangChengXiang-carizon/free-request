@@ -36,6 +36,16 @@ function stringifyResponseBody(data: unknown): string {
   }
 }
 
+function getContentTypeFromHeaders(headers: unknown): string {
+  if (!headers || typeof headers !== 'object' || Array.isArray(headers)) {
+    return '';
+  }
+
+  const match = Object.entries(headers as Record<string, unknown>)
+    .find(([key]) => key.toLowerCase() === 'content-type');
+  return match ? String(match[1] ?? '') : '';
+}
+
 function buildResponseBodyViews(data: unknown): { raw: string; pretty: string; isJson: boolean } {
   if (typeof data === 'string') {
     const raw = data;
@@ -87,10 +97,8 @@ export function buildResponseHtml(
   const responseHeaders = escapeHtml(JSON.stringify(response.headers, null, 2));
   const responseBodyViews = buildResponseBodyViews(response.data);
   const responseBodyRaw = responseBodyViews.raw;
-  const responseBodyPretty = responseBodyViews.pretty;
   const responseBodyRawEscaped = escapeHtml(responseBodyRaw);
-  const responseBodyPrettyEscaped = escapeHtml(responseBodyPretty);
-  const isJsonLikeResponse = responseBodyViews.isJson;
+  const responseContentType = getContentTypeFromHeaders(response.headers);
 
   return `
 <!DOCTYPE html>
@@ -145,6 +153,7 @@ export function buildResponseHtml(
     .search-status { min-width: 56px; text-align: right; font-size: 12px; color: #666; }
     .search-close { min-width: 28px; font-weight: 700; }
     pre { margin: 0; padding: 10px; background: #f7f8fa; color: #1f2328; border: 1px solid #d0d7de; border-radius: 4px; overflow-x: auto; overflow-y: auto; max-height: 64vh; white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
+    pre.no-wrap { white-space: pre; word-break: normal; }
     .json-key { color: var(--vscode-symbolIcon-propertyForeground, #9cdcfe); font-weight: 700; }
     .json-string { color: var(--vscode-debugTokenExpression-string, #ce9178); font-weight: 500; }
     .json-number { color: var(--vscode-debugTokenExpression-number, #b5cea8); font-weight: 600; }
@@ -170,9 +179,20 @@ export function buildResponseHtml(
   <section id="panel-body" class="panel active">
     <div class="toolbar">
       <button class="btn" id="copyBodyBtn" type="button">Copy Body</button>
+      <button class="btn" id="wrapBodyBtn" type="button">自动换行</button>
       <button class="btn" id="prettyBtn" type="button">Pretty</button>
       <button class="btn" id="rawBtn" type="button">Raw</button>
+      <select id="bodyFormatSelect" style="width: 140px;">
+        <option value="auto">Auto</option>
+        <option value="json">JSON</option>
+        <option value="xml">XML</option>
+        <option value="html">HTML</option>
+        <option value="text">Text</option>
+      </select>
       <span class="hint" id="formatHint"></span>
+      <div style="margin-left:auto; display:flex; align-items:center; gap:8px;">
+        <button class="btn" id="searchBodyBtn" type="button">搜索</button>
+      </div>
     </div>
     <div class="response-body-wrap">
       <div id="searchWidget" class="search-widget hidden">
@@ -184,7 +204,7 @@ export function buildResponseHtml(
         <span id="searchStatus" class="search-status"></span>
         <button class="btn search-btn search-close" id="searchCloseBtn" type="button" aria-label="关闭查找">×</button>
       </div>
-      <pre id="responseBody">${responseBodyPrettyEscaped}</pre>
+      <pre id="responseBody">${responseBodyRawEscaped}</pre>
     </div>
   </section>
   <section id="panel-headers" class="panel">
@@ -193,12 +213,27 @@ export function buildResponseHtml(
 
   <script>
     const responseBodyRaw = ${toScriptJson(responseBodyRaw)};
-    const responseBodyPretty = ${toScriptJson(responseBodyPretty)};
-    const hasPrettyView = ${isJsonLikeResponse ? 'true' : 'false'};
+    const responseContentType = ${toScriptJson(responseContentType)};
+    const wrapStorageKey = 'freeRequestStandaloneResponseWrapEnabled';
     let bodyViewMode = 'pretty';
+    let bodyWrapEnabled = true;
+    let bodyFormatMode = 'auto';
+    let detectedBodyFormat = 'text';
     let isSearchVisible = false;
     let currentMatchIndex = -1;
     let matchElements = [];
+
+    try {
+      const storedWrapState = window.localStorage.getItem(wrapStorageKey);
+      if (storedWrapState === 'false') {
+        bodyWrapEnabled = false;
+      }
+      if (storedWrapState === 'true') {
+        bodyWrapEnabled = true;
+      }
+    } catch {
+      // ignore localStorage read errors in restricted environments
+    }
 
     function updateSearchStatus(message) {
       const statusEl = document.getElementById('searchStatus');
@@ -359,33 +394,152 @@ export function buildResponseHtml(
       });
     }
 
+    function normalizeBodyFormat(format) {
+      const normalized = String(format || '').trim().toLowerCase();
+      if (normalized === 'json' || normalized === 'xml' || normalized === 'html' || normalized === 'text' || normalized === 'auto') {
+        return normalized;
+      }
+      return 'auto';
+    }
+
+    function detectBodyFormat(rawText, contentType) {
+      const lowerContentType = String(contentType || '').toLowerCase();
+      const trimmed = String(rawText || '').trim();
+
+      if (lowerContentType.includes('json')) {
+        return 'json';
+      }
+      if (lowerContentType.includes('html')) {
+        return 'html';
+      }
+      if (lowerContentType.includes('xml')) {
+        return 'xml';
+      }
+      if (lowerContentType.startsWith('text/')) {
+        return 'text';
+      }
+
+      if (trimmed) {
+        try {
+          JSON.parse(trimmed);
+          return 'json';
+        } catch {
+          const lowerTrimmed = trimmed.toLowerCase();
+          if (lowerTrimmed.startsWith('<!doctype html') || lowerTrimmed.startsWith('<html')) {
+            return 'html';
+          }
+          if (trimmed.startsWith('<') && trimmed.endsWith('>')) {
+            return 'xml';
+          }
+        }
+      }
+
+      return 'text';
+    }
+
+    function formatXmlLikeText(rawText) {
+      const source = String(rawText || '').trim();
+      if (!source) {
+        return '';
+      }
+
+      const tokens = source.replace(/>\s*</g, '><').split(/(<[^>]+>)/g).filter(Boolean);
+      let indent = 0;
+      const lines = [];
+
+      tokens.forEach((token) => {
+        const piece = token.trim();
+        if (!piece) {
+          return;
+        }
+
+        const isClosingTag = /^<\\//.test(piece);
+        const isSelfClosingTag = /^<[^>]+\\/>$/.test(piece) || /^<\\?/.test(piece) || /^<!/.test(piece);
+        const isOpeningTag = /^<[^/!][^>]*>$/.test(piece);
+
+        if (isClosingTag) {
+          indent = Math.max(0, indent - 1);
+        }
+
+        lines.push('  '.repeat(indent) + piece);
+
+        if (isOpeningTag && !isSelfClosingTag && !isClosingTag) {
+          indent += 1;
+        }
+      });
+
+      return lines.join('\\n');
+    }
+
+    function buildPrettyBodyText(rawText, format) {
+      const source = String(rawText || '');
+      if (!source.trim()) {
+        return '';
+      }
+
+      if (format === 'json') {
+        try {
+          return JSON.stringify(JSON.parse(source), null, 2);
+        } catch {
+          return source;
+        }
+      }
+
+      if (format === 'xml' || format === 'html') {
+        return formatXmlLikeText(source);
+      }
+
+      return source;
+    }
+
+    function getEffectiveBodyFormat() {
+      return bodyFormatMode === 'auto' ? detectedBodyFormat : bodyFormatMode;
+    }
+
     function updateBodyView() {
       const bodyEl = document.getElementById('responseBody');
       const copyBtn = document.getElementById('copyBodyBtn');
+      const wrapBtn = document.getElementById('wrapBodyBtn');
       const prettyBtn = document.getElementById('prettyBtn');
       const rawBtn = document.getElementById('rawBtn');
+      const bodyFormatSelectEl = document.getElementById('bodyFormatSelect');
       const formatHint = document.getElementById('formatHint');
       const searchInputEl = document.getElementById('searchInput');
-      if (!bodyEl || !copyBtn || !prettyBtn || !rawBtn || !formatHint) {
+      if (!bodyEl || !copyBtn || !wrapBtn || !prettyBtn || !rawBtn || !bodyFormatSelectEl || !formatHint) {
         return;
       }
 
-      const usePretty = hasPrettyView && bodyViewMode === 'pretty';
-      const selectedText = usePretty ? responseBodyPretty : responseBodyRaw;
-      if (hasPrettyView && usePretty) {
+      const hasBody = !!responseBodyRaw;
+      const effectiveFormat = getEffectiveBodyFormat();
+      const usePretty = hasBody && bodyViewMode === 'pretty';
+      const prettyText = usePretty ? buildPrettyBodyText(responseBodyRaw, effectiveFormat) : '';
+      if (usePretty && effectiveFormat === 'json') {
         try {
-          bodyEl.innerHTML = renderJsonValue(JSON.parse(selectedText), 0);
+          bodyEl.innerHTML = renderJsonValue(JSON.parse(prettyText), 0);
         } catch {
-          bodyEl.textContent = selectedText;
+          bodyEl.textContent = prettyText;
         }
+      } else if (usePretty) {
+        bodyEl.textContent = prettyText;
       } else {
-        bodyEl.textContent = selectedText;
+        bodyEl.textContent = responseBodyRaw;
       }
+      bodyEl.classList.toggle('no-wrap', !bodyWrapEnabled);
 
       copyBtn.disabled = !responseBodyRaw;
-      prettyBtn.disabled = !hasPrettyView || bodyViewMode === 'pretty';
-      rawBtn.disabled = !hasPrettyView || bodyViewMode === 'raw';
-      formatHint.textContent = hasPrettyView ? 'JSON 响应，支持 Pretty/Raw 视图' : '非 JSON 响应';
+      wrapBtn.disabled = !hasBody;
+      wrapBtn.textContent = bodyWrapEnabled ? '自动换行' : '不换行';
+      prettyBtn.disabled = !hasBody || bodyViewMode === 'pretty';
+      rawBtn.disabled = !hasBody || bodyViewMode === 'raw';
+      bodyFormatSelectEl.value = normalizeBodyFormat(bodyFormatMode);
+      if (!hasBody) {
+        formatHint.textContent = '暂无响应内容';
+      } else {
+        const formatLabel = bodyFormatMode === 'auto'
+          ? 'Auto (' + String(effectiveFormat).toUpperCase() + ')'
+          : String(effectiveFormat).toUpperCase();
+        formatHint.textContent = '响应格式：' + formatLabel;
+      }
 
       if (isSearchVisible) {
         applyHighlights(searchInputEl?.value || '');
@@ -494,6 +648,9 @@ export function buildResponseHtml(
     const prettyBtn = document.getElementById('prettyBtn');
     const rawBtn = document.getElementById('rawBtn');
     const copyBtn = document.getElementById('copyBodyBtn');
+    const searchBtn = document.getElementById('searchBodyBtn');
+    const wrapBtn = document.getElementById('wrapBodyBtn');
+    const bodyFormatSelectEl = document.getElementById('bodyFormatSelect');
     const searchInputEl = document.getElementById('searchInput');
     const searchPrevBtn = document.getElementById('searchPrevBtn');
     const searchNextBtn = document.getElementById('searchNextBtn');
@@ -509,8 +666,30 @@ export function buildResponseHtml(
       updateBodyView();
     });
 
+    bodyFormatSelectEl?.addEventListener('change', () => {
+      bodyFormatMode = normalizeBodyFormat(bodyFormatSelectEl.value);
+      updateBodyView();
+    });
+
+    wrapBtn?.addEventListener('click', () => {
+      bodyWrapEnabled = !bodyWrapEnabled;
+      try {
+        window.localStorage.setItem(wrapStorageKey, bodyWrapEnabled ? 'true' : 'false');
+      } catch {
+        // ignore localStorage write errors in restricted environments
+      }
+      updateBodyView();
+    });
+
+    searchBtn?.addEventListener('click', () => {
+      showSearchWidget();
+    });
+
     copyBtn?.addEventListener('click', async () => {
-      const text = hasPrettyView && bodyViewMode === 'pretty' ? responseBodyPretty : responseBodyRaw;
+      const effectiveFormat = getEffectiveBodyFormat();
+      const text = bodyViewMode === 'pretty'
+        ? buildPrettyBodyText(responseBodyRaw, effectiveFormat)
+        : responseBodyRaw;
       try {
         await copyText(text);
         formatHint.textContent = 'Body 已复制到剪贴板';
@@ -549,6 +728,9 @@ export function buildResponseHtml(
       }
     });
 
+    detectedBodyFormat = detectBodyFormat(responseBodyRaw, responseContentType);
+    bodyFormatMode = 'auto';
+    bodyViewMode = responseBodyRaw ? 'pretty' : 'raw';
     updateBodyView();
   </script>
 </body>
