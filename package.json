@@ -1,7 +1,7 @@
 {
   "name": "free-request",
   "displayName": "Free Request",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "publisher": "cxwang",
   "engines": {
     "vscode": "^1.109.0"
@@ -84,6 +84,11 @@
         "category": "Free Request"
       },
       {
+        "command": "free-request.viewHistoryItem",
+        "title": "查看历史记录",
+        "category": "Free Request"
+      },
+      {
         "command": "free-request.duplicateEnvGroup",
         "title": "复制环境组",
         "category": "Free Request"
@@ -98,6 +103,24 @@
         "title": "刷新",
         "category": "Free Request",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "free-request.refreshCollections",
+        "title": "刷新 Collections",
+        "category": "Free Request",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "free-request.refreshEnvironments",
+        "title": "刷新 Environments",
+        "category": "Free Request",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "free-request.clearHistory",
+        "title": "清空 History",
+        "category": "Free Request",
+        "icon": "$(trash)"
       },
       {
         "command": "free-request.manualSave",
@@ -138,13 +161,18 @@
           "group": "inline"
         },
         {
+          "command": "free-request.viewHistoryItem",
+          "when": "viewItem == history",
+          "group": "inline"
+        },
+        {
           "command": "free-request.renameItem",
           "when": "viewItem == collection || viewItem == request || viewItem == env_group || viewItem == environment",
           "group": "inline"
         },
         {
           "command": "free-request.deleteItem",
-          "when": "viewItem == collection || viewItem == request || viewItem == env_group || viewItem == environment",
+          "when": "viewItem == collection || viewItem == request || viewItem == env_group || viewItem == environment || viewItem == history",
           "group": "inline"
         },
         {
@@ -209,10 +237,28 @@
           "icon": "$(settings-gear)"
         },
         {
-          "command": "free-request.refreshTree",
-          "when": "view == free-request-collections || view == free-request-environments || view == free-request-history",
+          "command": "free-request.refreshCollections",
+          "when": "view == free-request-collections",
           "group": "navigation@9",
           "icon": "$(refresh)"
+        },
+        {
+          "command": "free-request.refreshEnvironments",
+          "when": "view == free-request-environments",
+          "group": "navigation@9",
+          "icon": "$(refresh)"
+        },
+        {
+          "command": "free-request.refreshTree",
+          "when": "view == free-request-history",
+          "group": "navigation@9",
+          "icon": "$(refresh)"
+        },
+        {
+          "command": "free-request.clearHistory",
+          "when": "view == free-request-history",
+          "group": "navigation@10",
+          "icon": "$(trash)"
         },
         {
           "command": "free-request.exportData",

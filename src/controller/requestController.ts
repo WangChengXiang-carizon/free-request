@@ -338,6 +338,7 @@ export async function sendRequest(
     const rawType: RequestRawType = request.rawType ?? 'json';
     const authType: RequestAuthType = request.authType ?? 'none';
     const resolvedBodyItems = resolveKeyValueItems(request.bodyItems, environmentMap);
+    const resolvedBinaryFilePath = resolveTemplateVariables(request.binaryFilePath ?? '', environmentMap).trim();
     const resolvedGraphQLQuery = resolveTemplateVariables(request.graphQLQuery ?? '', environmentMap);
     const resolvedGraphQLVariables = resolveTemplateVariables(request.graphQLVariables ?? '', environmentMap);
 
@@ -385,12 +386,11 @@ export async function sendRequest(
         delete resolvedHeaders['Content-Type'];
         delete resolvedHeaders['content-type'];
       } else if (bodyMode === 'binary') {
-        const rawFilePath = resolveTemplateVariables(request.binaryFilePath ?? '', environmentMap).trim();
-        if (!rawFilePath) {
+        if (!resolvedBinaryFilePath) {
           throw new Error('Binary 模式需要先选择文件');
         }
 
-        const fileContent = await vscode.workspace.fs.readFile(vscode.Uri.file(rawFilePath));
+        const fileContent = await vscode.workspace.fs.readFile(vscode.Uri.file(resolvedBinaryFilePath));
         axiosConfig.data = fileContent;
         if (!resolvedHeaders['Content-Type']) {
           resolvedHeaders['Content-Type'] = 'application/octet-stream';
@@ -424,13 +424,37 @@ export async function sendRequest(
     inProgressStatusBarMessage = vscode.window.setStatusBarMessage(
       `正在发送 ${request.method} 请求到 ${resolvedUrl}...`
     );
+    const requestSnapshot = buildHistoryRequestSnapshot(
+      request,
+      resolvedUrl,
+      resolvedHeaders,
+      bodyMode,
+      resolvedBodyText,
+      resolvedBodyItems,
+      resolvedBinaryFilePath,
+      resolvedGraphQLQuery,
+      resolvedGraphQLVariables
+    );
     const startedAt = Date.now();
     const response: AxiosResponse = await axios(axiosConfig);
     const durationMs = Date.now() - startedAt;
     const responseSizeBytes = getResponseSizeBytes(response.data);
+    const responseBodyText = stringifyResponseBody(response.data);
+    const responseHeadersText = JSON.stringify(response.headers, null, 2);
 
     deps.dataStore.updateRequestStatus(request.id, response.status);
-    deps.dataStore.addHistory(request.id, response.status, resolvedUrl);
+    deps.dataStore.addHistory(request.id, response.status, resolvedUrl, {
+      requestName: request.name,
+      requestSnapshot,
+      responseSnapshot: {
+        status: response.status,
+        statusText: response.statusText || '',
+        durationMs,
+        responseSizeBytes,
+        headersText: responseHeadersText,
+        bodyText: responseBodyText
+      }
+    });
 
     if (options?.showResponsePanel ?? true) {
       showResponsePanel(request, response, durationMs, responseSizeBytes, resolvedUrl);
@@ -444,8 +468,8 @@ export async function sendRequest(
       durationMs,
       responseSizeBytes,
       resolvedUrl,
-      bodyText: stringifyResponseBody(response.data),
-      headersText: JSON.stringify(response.headers, null, 2)
+      bodyText: responseBodyText,
+      headersText: responseHeadersText
     };
   } catch (error) {
     const err = error as Error;
@@ -470,10 +494,37 @@ export async function sendRequest(
     const message = timeoutLikeError
       ? '请求超时或连接被中断，请稍后重试'
       : err.message;
+    const environmentMap = toEnvironmentMap(deps.dataStore, request.envGroupId);
+    const requestSnapshot = buildHistoryRequestSnapshot(
+      request,
+      resolvedUrl,
+      Object.entries(request.headers).reduce<Record<string, string>>((acc, [key, value]) => {
+        acc[key] = resolveTemplateVariables(value, environmentMap);
+        return acc;
+      }, {}),
+      request.bodyMode ?? 'raw',
+      resolveTemplateVariables(request.body || '', environmentMap),
+      resolveKeyValueItems(request.bodyItems, environmentMap),
+      resolveTemplateVariables(request.binaryFilePath ?? '', environmentMap).trim(),
+      resolveTemplateVariables(request.graphQLQuery ?? '', environmentMap),
+      resolveTemplateVariables(request.graphQLVariables ?? '', environmentMap)
+    );
 
     vscode.window.showErrorMessage(`请求失败：${message}`);
     deps.dataStore.updateRequestStatus(request.id, 0);
-    deps.dataStore.addHistory(request.id, 0, resolvedUrl);
+    deps.dataStore.addHistory(request.id, 0, resolvedUrl, {
+      requestName: request.name,
+      requestSnapshot,
+      responseSnapshot: {
+        status: 0,
+        statusText: '',
+        durationMs: 0,
+        responseSizeBytes: 0,
+        headersText: '',
+        bodyText: '',
+        errorMessage: message
+      }
+    });
 
     return {
       ok: false,
@@ -617,6 +668,90 @@ function resolveKeyValueItems(
 
 function getEnabledKeyValueItems(items: KeyValueItem[]): KeyValueItem[] {
   return items.filter(item => item.enabled && item.key.trim() !== '');
+}
+
+function buildHistoryRequestSnapshot(
+  request: RequestModel,
+  resolvedUrl: string,
+  resolvedHeaders: Record<string, string>,
+  bodyMode: RequestBodyMode,
+  resolvedBodyText: string,
+  resolvedBodyItems: KeyValueItem[],
+  resolvedBinaryFilePath: string,
+  resolvedGraphQLQuery: string,
+  resolvedGraphQLVariables: string
+) {
+  return {
+    method: request.method,
+    url: resolvedUrl,
+    headersText: JSON.stringify(resolvedHeaders, null, 2),
+    bodyText: buildHistoryRequestBodyPreview(
+      request.method,
+      bodyMode,
+      resolvedBodyText,
+      resolvedBodyItems,
+      resolvedBinaryFilePath,
+      resolvedGraphQLQuery,
+      resolvedGraphQLVariables
+    )
+  };
+}
+
+function buildHistoryRequestBodyPreview(
+  method: RequestModel['method'],
+  bodyMode: RequestBodyMode,
+  resolvedBodyText: string,
+  resolvedBodyItems: KeyValueItem[],
+  resolvedBinaryFilePath: string,
+  resolvedGraphQLQuery: string,
+  resolvedGraphQLVariables: string
+): string {
+  if (method === 'GET' || method === 'HEAD' || bodyMode === 'none') {
+    return '';
+  }
+
+  if (bodyMode === 'x-www-form-urlencoded') {
+    const params = new URLSearchParams();
+    getEnabledKeyValueItems(resolvedBodyItems).forEach(item => {
+      params.append(item.key, item.value);
+    });
+    return params.toString();
+  }
+
+  if (bodyMode === 'form-data') {
+    return getEnabledKeyValueItems(resolvedBodyItems)
+      .map(item => `${item.key}=${item.value}`)
+      .join('\n');
+  }
+
+  if (bodyMode === 'binary') {
+    return resolvedBinaryFilePath ? `[binary] ${resolvedBinaryFilePath}` : '[binary]';
+  }
+
+  if (bodyMode === 'graphql') {
+    const query = resolvedGraphQLQuery.trim();
+    const rawVariables = resolvedGraphQLVariables.trim();
+    let parsedVariables: unknown = {};
+
+    if (rawVariables) {
+      try {
+        parsedVariables = JSON.parse(rawVariables);
+      } catch {
+        parsedVariables = rawVariables;
+      }
+    }
+
+    return JSON.stringify(
+      {
+        query,
+        variables: parsedVariables
+      },
+      null,
+      2
+    );
+  }
+
+  return resolvedBodyText;
 }
 
 function getRawContentType(rawType: RequestRawType): string {

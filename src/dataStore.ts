@@ -120,6 +120,14 @@ export class DataStore {
     }
   }
 
+  async reloadPersistData() {
+    await this.loadPersistData();
+    this._isDataLoaded = true;
+    this.validateRequestCollectionLinks();
+    this.validateEnvGroupLinks();
+    this._onDidLoadData.fire();
+  }
+
   async savePersistData() {
     try {
       this.trimHistoryForPersistence();
@@ -573,13 +581,41 @@ export class DataStore {
     return newEnv;
   }
 
-  addHistory(requestId: string, status: number, url: string) {
+  deleteHistory(id: string): boolean {
+    const beforeCount = this.history.length;
+    this.history = this.history.filter(item => item.id !== id);
+    if (this.history.length === beforeCount) {
+      return false;
+    }
+    this.savePersistData();
+    return true;
+  }
+
+  clearHistory(): boolean {
+    if (this.history.length === 0) {
+      return false;
+    }
+
+    this.history = [];
+    this.savePersistData();
+    return true;
+  }
+
+  addHistory(
+    requestId: string,
+    status: number,
+    url: string,
+    extras?: Partial<Pick<HistoryModel, 'requestName' | 'requestSnapshot' | 'responseSnapshot'>>
+  ) {
     const history: HistoryModel = {
       id: generateUniqueId('hist'),
       requestId,
       timestamp: Date.now(),
       status,
-      url
+      url,
+      requestName: extras?.requestName,
+      requestSnapshot: extras?.requestSnapshot,
+      responseSnapshot: extras?.responseSnapshot
     };
     this.history.unshift(history);
     this.trimHistoryForPersistence();

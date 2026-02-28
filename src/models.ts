@@ -59,6 +59,22 @@ export interface HistoryModel {
   timestamp: number;
   status: number;
   url: string;
+  requestName?: string;
+  requestSnapshot?: {
+    method: HttpMethod;
+    url: string;
+    headersText: string;
+    bodyText: string;
+  };
+  responseSnapshot?: {
+    status: number;
+    statusText: string;
+    durationMs: number;
+    responseSizeBytes: number;
+    headersText: string;
+    bodyText: string;
+    errorMessage?: string;
+  };
 }
 
 export interface PersistData {

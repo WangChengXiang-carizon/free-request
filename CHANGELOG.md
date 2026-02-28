@@ -6,6 +6,13 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.0.4] - 2026-02-28
+
+### Changed
+
+- 版本号升级至 `0.0.4`
+- 发布新的 `0.0.4` VSIX 安装包
+
 ## [0.0.3] - 2026-02-27
 
 ### Added
@@ -17,6 +24,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - 新增响应 Body 格式选择器：`Auto`、`JSON`、`XML`、`HTML`、`Text`
 - 新增响应区显式搜索按钮（请求编辑页与单独响应页）
 - 新增响应区“自动换行 / 不换行”切换按钮（请求编辑页与单独响应页）
+- 新增 History 单条记录查看能力，可展示对应请求与响应详情
+- 新增 History 单条删除与标题栏一键清空
 
 ### Changed
 

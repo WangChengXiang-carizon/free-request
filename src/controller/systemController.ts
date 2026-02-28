@@ -11,6 +11,38 @@ export interface SystemControllerDeps {
 
 export function registerSystemCommands(deps: SystemControllerDeps): vscode.Disposable[] {
   return [
+    vscode.commands.registerCommand('free-request.clearHistory', async () => {
+      const confirm = await vscode.window.showWarningMessage(
+        '确定要清空所有 History 记录吗？此操作不可恢复。',
+        { modal: true },
+        '清空'
+      );
+
+      if (confirm !== '清空') {
+        return;
+      }
+
+      const cleared = deps.dataStore.clearHistory();
+      deps.refreshHistory();
+      if (cleared) {
+        vscode.window.setStatusBarMessage('Free Request: History 已清空', 3000);
+      } else {
+        vscode.window.setStatusBarMessage('Free Request: History 当前为空', 3000);
+      }
+    }),
+
+    vscode.commands.registerCommand('free-request.refreshCollections', async () => {
+      await deps.dataStore.reloadPersistData();
+      deps.refreshCollectionsWithRetry();
+      vscode.window.setStatusBarMessage('Free Request: Collections 面板已刷新并重载数据', 3000);
+    }),
+
+    vscode.commands.registerCommand('free-request.refreshEnvironments', async () => {
+      await deps.dataStore.reloadPersistData();
+      deps.refreshEnvironments();
+      vscode.window.setStatusBarMessage('Free Request: Environments 面板已刷新并重载数据', 3000);
+    }),
+
     vscode.commands.registerCommand('free-request.manualSave', async () => {
       await deps.dataStore.savePersistData();
       vscode.window.setStatusBarMessage(`Free Request: 数据已手动保存到 ${deps.dataStore.getPersistPathFsPath()}`, 5000);

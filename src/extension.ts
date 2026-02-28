@@ -152,6 +152,11 @@ class HistoryNode extends BaseTreeNode {
     this.iconPath = new vscode.ThemeIcon('clock');
     this.description = timeStr;
     this.tooltip = `${request.url} (${new Date(history.timestamp).toLocaleString()})`;
+    this.command = {
+      command: 'free-request.viewHistoryItem',
+      title: '查看历史记录',
+      arguments: [this]
+    };
   }
 }
 
