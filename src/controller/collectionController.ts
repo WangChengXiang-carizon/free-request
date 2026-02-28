@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { DataStore } from '../dataStore';
-import type { RequestModel } from '../models';
+import type { CollectionModel, RequestModel } from '../models';
 import type { ShowInputDialog } from '../view/input';
 
 interface CommandNode {
@@ -44,6 +44,75 @@ function getNextDefaultRequestName(dataStore: DataStore, collectionId?: string):
 
 export function registerCollectionCommands(deps: CollectionControllerDeps): vscode.Disposable[] {
   return [
+    vscode.commands.registerCommand('free-request.exportSingleCollection', async (node: CommandNode) => {
+      if (node?.type !== 'collection') {
+        return;
+      }
+
+      const defaultUri = vscode.workspace.workspaceFolders?.[0]
+        ? vscode.Uri.joinPath(vscode.workspace.workspaceFolders[0].uri, `${node.label}.collection.json`)
+        : undefined;
+
+      const saveUri = await vscode.window.showSaveDialog({
+        title: '导出当前 Collection',
+        defaultUri,
+        filters: { JSON: ['json'] }
+      });
+      if (!saveUri) {
+        return;
+      }
+
+      try {
+        const exportPayload = deps.dataStore.exportCollectionData(node.id);
+        const content = JSON.stringify(exportPayload, null, 2);
+        await vscode.workspace.fs.writeFile(saveUri, new TextEncoder().encode(content));
+        vscode.window.setStatusBarMessage(`Free Request: Collection 导出成功 -> ${saveUri.fsPath}`, 5000);
+      } catch (error) {
+        vscode.window.showErrorMessage(`导出 Collection 失败：${(error as Error).message}`);
+      }
+    }),
+
+    vscode.commands.registerCommand('free-request.importIntoCollection', async (node: CommandNode) => {
+      if (node?.type !== 'collection') {
+        return;
+      }
+
+      const openUris = await vscode.window.showOpenDialog({
+        title: `导入到 Collection: ${node.label}`,
+        canSelectFiles: true,
+        canSelectFolders: false,
+        canSelectMany: false,
+        filters: { JSON: ['json'] }
+      });
+      if (!openUris || openUris.length === 0) {
+        return;
+      }
+
+      const targetUri = openUris[0];
+      try {
+        const raw = await vscode.workspace.fs.readFile(targetUri);
+        const parsed = JSON.parse(new TextDecoder().decode(raw)) as Partial<{ collections: unknown; requests: unknown }>;
+        const payload = {
+          collections: Array.isArray(parsed.collections)
+            ? parsed.collections as CollectionModel[]
+            : [],
+          requests: Array.isArray(parsed.requests)
+            ? parsed.requests as RequestModel[]
+            : []
+        };
+
+        const result = await deps.dataStore.importCollectionData(payload, node.id);
+
+        deps.refreshCollectionsWithRetry();
+        vscode.window.setStatusBarMessage(
+          `Free Request: 已导入 ${result.collectionCount} 个 Collection，${result.requestCount} 个 Request`,
+          5000
+        );
+      } catch (error) {
+        vscode.window.showErrorMessage(`导入 Collection 失败：${(error as Error).message}`);
+      }
+    }),
+
     vscode.commands.registerCommand('free-request.newCollection', async () => {
       const name = await deps.showInputDialog(
         '新建根集合',

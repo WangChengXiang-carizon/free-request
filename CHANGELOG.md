@@ -6,6 +6,16 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.0.5] - 2026-02-28
+
+### Added
+
+- 支持单个 Collection 导出与导入（含子集合与请求）
+
+### Changed
+
+- `Ctrl/Cmd+S` 保存前会同步 PATH 请求名，避免必须失焦后左侧才刷新
+
 ## [0.0.4] - 2026-02-28
 
 ### Changed

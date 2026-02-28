@@ -87,10 +87,10 @@ class RequestNode extends BaseTreeNode {
         this.iconPath = new vscode.ThemeIcon('cloud-upload', new vscode.ThemeColor('charts.blue'));
         break;
       case 'PUT':
-        this.iconPath = new vscode.ThemeIcon('cloud-update', new vscode.ThemeColor('charts.orange'));
+        this.iconPath = new vscode.ThemeIcon('sync', new vscode.ThemeColor('charts.orange'));
         break;
       case 'DELETE':
-        this.iconPath = new vscode.ThemeIcon('cloud-delete', new vscode.ThemeColor('charts.red'));
+        this.iconPath = new vscode.ThemeIcon('trash', new vscode.ThemeColor('charts.red'));
         break;
       case 'PATCH':
         this.iconPath = new vscode.ThemeIcon('wrench', new vscode.ThemeColor('charts.purple'));

@@ -1,7 +1,7 @@
 {
   "name": "free-request",
   "displayName": "Free Request",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "publisher": "cxwang",
   "engines": {
     "vscode": "^1.109.0"
@@ -61,6 +61,16 @@
       {
         "command": "free-request.duplicateCollection",
         "title": "复制",
+        "category": "Free Request"
+      },
+      {
+        "command": "free-request.exportSingleCollection",
+        "title": "导出当前集合",
+        "category": "Free Request"
+      },
+      {
+        "command": "free-request.importIntoCollection",
+        "title": "导入到当前集合",
         "category": "Free Request"
       },
       {
@@ -184,6 +194,16 @@
           "command": "free-request.duplicateCollection",
           "when": "viewItem == collection",
           "group": "inline"
+        },
+        {
+          "command": "free-request.exportSingleCollection",
+          "when": "viewItem == collection",
+          "group": "navigation@20"
+        },
+        {
+          "command": "free-request.importIntoCollection",
+          "when": "viewItem == collection",
+          "group": "navigation@21"
         },
         {
           "command": "free-request.newSubEnvGroup",

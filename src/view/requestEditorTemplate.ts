@@ -1369,6 +1369,24 @@ export function buildRequestEditorHtml(
       updateRequestPath();
     }
 
+    function syncRequestNameFromPathInput() {
+      const requestNameEl = document.getElementById('pathRequestName');
+      if (!requestNameEl) {
+        return;
+      }
+
+      const nextName = requestNameEl.value.trim();
+      if (!nextName) {
+        requestNameEl.value = requestName;
+        return;
+      }
+
+      if (nextName !== requestName) {
+        requestName = nextName;
+        updateRequestPath();
+      }
+    }
+
     function switchResponseTab(tabName) {
       document.querySelectorAll('.response-tab').forEach((tab) => {
         tab.classList.toggle('active', tab.dataset.respTab === tabName);
@@ -2334,6 +2352,7 @@ export function buildRequestEditorHtml(
     }
 
     function saveRequest() {
+      syncRequestNameFromPathInput();
       const requestData = buildRequestData();
       if (!requestData) {
         return false;
@@ -2347,6 +2366,7 @@ export function buildRequestEditorHtml(
     }
 
     function saveAsRequest() {
+      syncRequestNameFromPathInput();
       const requestData = buildRequestData();
       if (!requestData) {
         return false;
@@ -2364,6 +2384,7 @@ export function buildRequestEditorHtml(
     }
 
     function openCodePreview() {
+      syncRequestNameFromPathInput();
       const requestData = buildRequestData();
       if (!requestData) {
         return;
@@ -2631,6 +2652,13 @@ export function buildRequestEditorHtml(
       }
     });
     document.addEventListener('keydown', (event) => {
+      const isSaveShortcut = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's';
+      if (isSaveShortcut) {
+        event.preventDefault();
+        saveRequest();
+        return;
+      }
+
       const isFindShortcut = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f';
       if (isFindShortcut) {
         const respPanelBody = document.getElementById('resp-panel-body');

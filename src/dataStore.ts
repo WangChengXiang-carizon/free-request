@@ -164,6 +164,141 @@ export class DataStore {
     };
   }
 
+  exportCollectionData(collectionId: string): Pick<PersistData, 'collections' | 'requests'> {
+    const rootCollection = this.collections.find(collection => collection.id === collectionId);
+    if (!rootCollection) {
+      throw new Error(`Collection ${collectionId} not found`);
+    }
+
+    const subtreeCollectionIds = new Set<string>();
+    const stack = [collectionId];
+    while (stack.length > 0) {
+      const currentId = stack.pop();
+      if (!currentId || subtreeCollectionIds.has(currentId)) {
+        continue;
+      }
+
+      subtreeCollectionIds.add(currentId);
+      this.collections
+        .filter(collection => collection.parentId === currentId)
+        .forEach(child => stack.push(child.id));
+    }
+
+    const selectedCollections = this.collections
+      .filter(collection => subtreeCollectionIds.has(collection.id))
+      .map(collection => ({
+        ...collection,
+        parentId: collection.id === collectionId
+          ? undefined
+          : (subtreeCollectionIds.has(collection.parentId ?? '') ? collection.parentId : undefined),
+        requests: [...collection.requests]
+      }));
+
+    const requestIds = new Set<string>();
+    selectedCollections.forEach(collection => {
+      collection.requests.forEach(requestId => requestIds.add(requestId));
+    });
+
+    const selectedRequests = this.requests
+      .filter(request => requestIds.has(request.id))
+      .map(request => ({
+        ...request,
+        params: Array.isArray(request.params) ? request.params.map(item => ({ ...item })) : [],
+        headers: { ...request.headers },
+        bodyItems: Array.isArray(request.bodyItems) ? request.bodyItems.map(item => ({ ...item })) : []
+      }));
+
+    return {
+      collections: selectedCollections,
+      requests: selectedRequests
+    };
+  }
+
+  async importCollectionData(
+    payload: Partial<Pick<PersistData, 'collections' | 'requests'>>,
+    parentCollectionId?: string
+  ): Promise<{ collectionCount: number; requestCount: number }> {
+    const sourceCollections = Array.isArray(payload.collections) ? payload.collections : [];
+    const sourceRequests = Array.isArray(payload.requests) ? payload.requests : [];
+
+    if (sourceCollections.length === 0) {
+      throw new Error('导入数据中缺少 collections');
+    }
+
+    if (parentCollectionId && !this.collections.some(collection => collection.id === parentCollectionId)) {
+      throw new Error('目标父集合不存在');
+    }
+
+    const sourceCollectionMap = new Map(sourceCollections.map(collection => [collection.id, collection]));
+    const sourceRequestMap = new Map(sourceRequests.map(request => [request.id, request]));
+    const sourceRoots = sourceCollections.filter(collection => !collection.parentId || !sourceCollectionMap.has(collection.parentId));
+
+    if (sourceRoots.length === 0) {
+      throw new Error('导入数据中缺少可识别的根集合');
+    }
+
+    const createdCollectionIdMap = new Map<string, string>();
+    const visitQueue: Array<{ sourceId: string; targetParentId?: string }> = sourceRoots
+      .map(root => ({ sourceId: root.id, targetParentId: parentCollectionId }));
+
+    while (visitQueue.length > 0) {
+      const current = visitQueue.shift();
+      if (!current || createdCollectionIdMap.has(current.sourceId)) {
+        continue;
+      }
+
+      const sourceCollection = sourceCollectionMap.get(current.sourceId);
+      if (!sourceCollection) {
+        continue;
+      }
+
+      const createdCollection = this.addCollectionInternal(sourceCollection.name, current.targetParentId);
+      createdCollectionIdMap.set(sourceCollection.id, createdCollection.id);
+
+      const childCollections = sourceCollections.filter(collection => collection.parentId === sourceCollection.id);
+      childCollections.forEach(child => {
+        visitQueue.push({
+          sourceId: child.id,
+          targetParentId: createdCollection.id
+        });
+      });
+    }
+
+    let importedRequestCount = 0;
+    for (const sourceCollection of sourceCollections) {
+      const createdCollectionId = createdCollectionIdMap.get(sourceCollection.id);
+      if (!createdCollectionId) {
+        continue;
+      }
+
+      const requestIds = Array.isArray(sourceCollection.requests) ? sourceCollection.requests : [];
+      requestIds.forEach(requestId => {
+        const sourceRequest = sourceRequestMap.get(requestId);
+        if (!sourceRequest) {
+          return;
+        }
+
+        this.addRequestInternal({
+          ...sourceRequest,
+          params: Array.isArray(sourceRequest.params) ? sourceRequest.params.map(item => ({ ...item })) : [],
+          headers: { ...sourceRequest.headers },
+          bodyItems: Array.isArray(sourceRequest.bodyItems) ? sourceRequest.bodyItems.map(item => ({ ...item })) : [],
+          collectionId: createdCollectionId,
+          lastStatus: undefined
+        });
+        importedRequestCount += 1;
+      });
+    }
+
+    this.validateRequestCollectionLinks();
+    await this.savePersistData();
+
+    return {
+      collectionCount: createdCollectionIdMap.size,
+      requestCount: importedRequestCount
+    };
+  }
+
   async importPersistData(persistData: Partial<PersistData>) {
     this.collections = Array.isArray(persistData.collections) ? persistData.collections : [];
     this.requests = Array.isArray(persistData.requests) ? persistData.requests : [];
